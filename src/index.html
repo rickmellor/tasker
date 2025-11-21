@@ -33,15 +33,7 @@
             <div class="agent-header">
               <span class="material-icons">smart_toy</span>
               <span>AI Agent</span>
-            </div>
-
-            <div class="agent-quick-prompts">
-              <select id="agent-quick-select" class="agent-quick-select">
-                <option value="">Quick Prompts...</option>
-                <option value="Show my 3 highest priority tasks">High Priority Tasks</option>
-                <option value="Show the work due in the next 3 days">Due in 3 Days</option>
-                <option value="What should I work on now?">What to Work On</option>
-              </select>
+              <span id="agent-model-name" class="agent-model-name"></span>
             </div>
 
             <div class="agent-chat" id="agent-chat">
@@ -54,6 +46,16 @@
 
             <div class="agent-input-container">
               <input type="text" id="agent-input" class="agent-input" placeholder="Ask about your tasks..." />
+              <div class="agent-quick-dropdown">
+                <button id="agent-quick-btn" class="agent-quick-btn" title="Quick prompts">
+                  <span class="material-icons">bolt</span>
+                </button>
+                <div id="agent-quick-menu" class="agent-quick-menu">
+                  <button class="agent-quick-option" data-prompt="Show my 3 highest priority tasks">High Priority Tasks</button>
+                  <button class="agent-quick-option" data-prompt="Show the work due in the next 3 days">Due in 3 Days</button>
+                  <button class="agent-quick-option" data-prompt="What should I work on now?">What to Work On</button>
+                </div>
+              </div>
               <button id="agent-send-btn" class="agent-send-btn" title="Send message">
                 <span class="material-icons">send</span>
               </button>
@@ -448,6 +450,14 @@
             <div class="shortcut-item">
               <kbd>Enter</kbd>
               <span class="shortcut-description">Add new task (when in task input)</span>
+            </div>
+          </div>
+
+          <div class="shortcuts-section">
+            <h4>Task Actions</h4>
+            <div class="shortcut-item">
+              <kbd>Ctrl</kbd> + <span style="font-size: 0.9rem;">Click Delete</span>
+              <span class="shortcut-description">Permanently delete task and all children (cannot be undone)</span>
             </div>
           </div>
         </div>

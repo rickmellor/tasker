@@ -306,6 +306,7 @@ body[data-theme="dark"] .sidebar-logo-dark {
   font-size: 0.9rem;
   text-align: left;
   font-family: inherit;
+  min-width: 0; /* Allow content to shrink */
 }
 
 .nav-item:hover {
@@ -350,6 +351,10 @@ body[data-theme="dark"] .sidebar-logo-dark {
 
 .nav-label {
   flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0; /* Allow shrinking */
 }
 
 /* ========================================
@@ -362,6 +367,8 @@ body[data-theme="dark"] .sidebar-logo-dark {
   background: var(--bg-secondary);
   max-height: 400px;
   min-height: 200px;
+  min-width: 0; /* Allow content to shrink */
+  overflow: hidden; /* Prevent overflow from this container */
 }
 
 .agent-header {
@@ -373,6 +380,7 @@ body[data-theme="dark"] .sidebar-logo-dark {
   font-weight: 500;
   color: var(--text-primary);
   font-size: 0.9rem;
+  min-width: 0; /* Allow flex items to shrink below content size */
 }
 
 .agent-header .material-icons {
@@ -380,27 +388,95 @@ body[data-theme="dark"] .sidebar-logo-dark {
   color: var(--accent-primary);
 }
 
-.agent-quick-prompts {
-  padding: 0.5rem;
-  border-bottom: 1px solid var(--border-color);
+.agent-model-name {
+  margin-left: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0; /* Allow shrinking */
+  flex-shrink: 1; /* Allow this to shrink first */
 }
 
-.agent-quick-select {
-  width: 100%;
-  padding: 0.4rem 0.6rem;
-  background: var(--bg-primary);
+.agent-quick-dropdown {
+  position: relative;
+  flex-shrink: 0; /* Don't shrink the dropdown container */
+}
+
+.agent-quick-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 4px;
   color: var(--text-secondary);
-  font-size: 0.75rem;
   cursor: pointer;
-  font-family: inherit;
   transition: all 0.15s;
+  flex-shrink: 0; /* Don't shrink the button */
 }
 
-.agent-quick-select:focus {
-  outline: none;
+.agent-quick-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.agent-quick-btn.active {
+  background: var(--accent-primary);
+  color: white;
   border-color: var(--accent-primary);
+}
+
+.agent-quick-btn .material-icons {
+  font-size: 18px;
+}
+
+.agent-quick-menu {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  right: 0;
+  min-width: 200px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  overflow: hidden;
+}
+
+.agent-quick-menu.active {
+  display: block;
+}
+
+.agent-quick-option {
+  display: block;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-light);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-family: inherit;
+}
+
+.agent-quick-option:last-child {
+  border-bottom: none;
+}
+
+.agent-quick-option:hover {
+  background: var(--bg-hover);
+  color: var(--accent-primary);
 }
 
 .agent-chat {
@@ -414,6 +490,8 @@ body[data-theme="dark"] .sidebar-logo-dark {
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.5rem;
+  overflow-wrap: break-word; /* Break long words if needed */
+  word-wrap: break-word; /* Legacy support */
 }
 
 .agent-message {
@@ -422,6 +500,8 @@ body[data-theme="dark"] .sidebar-logo-dark {
   font-size: 0.8rem;
   line-height: 1.4;
   word-wrap: break-word;
+  overflow-wrap: break-word; /* Break long words if needed */
+  min-width: 0; /* Allow shrinking */
 }
 
 .agent-message-system {
@@ -519,6 +599,8 @@ body[data-theme="dark"] .sidebar-logo-dark {
   gap: 0.25rem;
   padding: 0.5rem;
   border-top: 1px solid var(--border-color);
+  min-width: 0; /* Allow flex items to shrink */
+  overflow: hidden; /* Prevent overflow */
 }
 
 .agent-input {
@@ -530,6 +612,7 @@ body[data-theme="dark"] .sidebar-logo-dark {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: inherit;
+  min-width: 0; /* Allow input to shrink below content */
 }
 
 .agent-input:focus {
@@ -550,6 +633,7 @@ body[data-theme="dark"] .sidebar-logo-dark {
   color: white;
   cursor: pointer;
   transition: all 0.15s;
+  flex-shrink: 0; /* Don't shrink the button */
 }
 
 .agent-send-btn:hover {
@@ -1092,12 +1176,45 @@ body[data-theme="dark"] .sidebar-logo-dark {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+}
+
+.task-delete .material-icons {
+  font-size: 16px;
+}
+
+.task-delete-icon {
+  display: block;
+}
+
+.task-delete-icon-permanent {
+  display: none;
 }
 
 .task-delete:hover {
   background: var(--danger);
   color: white;
   border-color: var(--danger);
+}
+
+/* Permanent delete mode when Ctrl is pressed */
+.task-delete.permanent-delete {
+  color: #1a1a1a;
+}
+
+.task-delete.permanent-delete .task-delete-icon {
+  display: none;
+}
+
+.task-delete.permanent-delete .task-delete-icon-permanent {
+  display: block;
+}
+
+.task-delete.permanent-delete:hover {
+  background: #FFD700;
+  color: #1a1a1a;
+  border-color: #FFD700;
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.6);
 }
 
 /* Expand/Collapse Button */
@@ -1132,6 +1249,31 @@ body[data-theme="dark"] .sidebar-logo-dark {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   margin-left: 0.5rem;
+}
+
+/* Date Indicator */
+.task-date-indicator {
+  font-size: 0.9rem;
+  color: var(--text-tertiary);
+  margin-left: 0.5rem;
+  cursor: help;
+  opacity: 0.7;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.task-date-indicator:hover {
+  opacity: 1;
+  color: var(--accent-primary);
+}
+
+.task-date-indicator.past-due {
+  color: var(--danger);
+  opacity: 1;
+}
+
+.task-date-indicator.past-due:hover {
+  color: var(--danger);
+  filter: brightness(1.2);
 }
 
 /* Drag and Drop States */

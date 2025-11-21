@@ -25,7 +25,8 @@ const state = {
     { id: 1, label: 'High Priority Tasks', prompt: 'Show my 3 highest priority tasks' },
     { id: 2, label: 'Due in 3 Days', prompt: 'Show the work due in the next 3 days' },
     { id: 3, label: 'What to Work On', prompt: 'What should I work on now?' }
-  ]
+  ],
+  ctrlKeyPressed: false // Track Ctrl/Cmd key state for delete button styling
 };
 
 // ========================================
@@ -152,7 +153,9 @@ const elements = {
   agentMessages: document.getElementById('agent-messages'),
   agentInput: document.getElementById('agent-input'),
   agentSendBtn: document.getElementById('agent-send-btn'),
-  agentQuickSelect: document.getElementById('agent-quick-select')
+  agentQuickBtn: document.getElementById('agent-quick-btn'),
+  agentQuickMenu: document.getElementById('agent-quick-menu'),
+  agentModelName: document.getElementById('agent-model-name')
 };
 
 // ========================================
@@ -883,12 +886,12 @@ async function pasteFromClipboard() {
   }
 }
 
-async function deleteTask(taskPath, isDeleted) {
+async function deleteTask(taskPath, isDeleted, forcePermDelete = false) {
   try {
     let result;
 
-    if (isDeleted) {
-      // Permanently delete if already in deleted folder
+    if (isDeleted || forcePermDelete) {
+      // Permanently delete if already in deleted folder OR if Ctrl is pressed
       result = await window.electronAPI.tasks.permanentlyDelete(taskPath);
     } else {
       // Move to deleted folder
@@ -1404,6 +1407,21 @@ function renderTaskList(tasks, level) {
     const priorityClass = task.priority === 'high' ? 'priority-high' : 'priority-normal';
     const isDeleted = task.deleted || false;
 
+    // Format dates for tooltip
+    const hasDueDate = task.dueDate && task.dueDate.trim();
+    let dateTooltip = '';
+    let isPastDue = false;
+    if (hasDueDate) {
+      const createdDate = new Date(task.created);
+      const dueDate = new Date(task.dueDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Reset to start of day for accurate comparison
+      dueDate.setHours(0, 0, 0, 0);
+
+      isPastDue = dueDate < today && !task.completed;
+      dateTooltip = `Due: ${dueDate.toLocaleDateString()}\nCreated: ${createdDate.toLocaleDateString()}`;
+    }
+
     return `
       <div class="task-item ${task.completed ? 'completed' : ''}"
            data-task-id="${task.id}"
@@ -1429,11 +1447,16 @@ function renderTaskList(tasks, level) {
           <span class="task-text">${escapeHtml(task.title)}</span>
 
           ${hasChildren ? `<span class="task-child-count">(${task.children.length})</span>` : ''}
+
+          ${hasDueDate ? `<span class="task-date-indicator ${isPastDue ? 'past-due' : ''} material-icons" title="${escapeHtml(dateTooltip)}">event</span>` : ''}
         </div>
 
         <div class="task-actions">
           ${isDeleted ? '<button class="task-restore" title="Restore task">+</button>' : ''}
-          <button class="task-delete" title="${isDeleted ? 'Permanently delete task' : 'Delete task'}">✕</button>
+          <button class="task-delete" title="${isDeleted ? 'Permanently delete task' : 'Delete task (Ctrl+click to permanently delete)'}">
+            <span class="material-icons task-delete-icon">delete</span>
+            <span class="material-icons task-delete-icon-permanent">delete_forever</span>
+          </button>
         </div>
       </div>
       ${hasChildren && isExpanded ? renderTaskList(task.children, level + 1) : ''}
@@ -1883,13 +1906,29 @@ function closeHelpModal() {
 // ========================================
 // Keyboard Shortcuts
 // ========================================
+function updateDeleteButtonStates() {
+  // Update all delete button appearances based on Ctrl key state
+  document.querySelectorAll('.task-delete').forEach(btn => {
+    const taskItem = btn.closest('.task-item');
+    const isDeleted = taskItem?.dataset.taskDeleted === 'true';
+
+    if (state.ctrlKeyPressed && !isDeleted) {
+      btn.classList.add('permanent-delete');
+    } else {
+      btn.classList.remove('permanent-delete');
+    }
+  });
+}
+
 function setupKeyboardShortcuts() {
-  // Track Ctrl key state for Ctrl+Click to exit
+  // Track Ctrl key state for Ctrl+Click to exit and delete button styling
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Control' || e.key === 'Meta') {
       if (window.electronAPI.setCtrlKeyState) {
         window.electronAPI.setCtrlKeyState(true);
       }
+      state.ctrlKeyPressed = true;
+      updateDeleteButtonStates();
     }
   });
 
@@ -1898,6 +1937,8 @@ function setupKeyboardShortcuts() {
       if (window.electronAPI.setCtrlKeyState) {
         window.electronAPI.setCtrlKeyState(false);
       }
+      state.ctrlKeyPressed = false;
+      updateDeleteButtonStates();
     }
   });
 
@@ -1906,6 +1947,8 @@ function setupKeyboardShortcuts() {
     if (window.electronAPI.setCtrlKeyState) {
       window.electronAPI.setCtrlKeyState(false);
     }
+    state.ctrlKeyPressed = false;
+    updateDeleteButtonStates();
   });
 
   document.addEventListener('keydown', async (e) => {
@@ -2110,8 +2153,19 @@ async function browseForOllama() {
   }
 }
 
+function updateAgentModelDisplay() {
+  if (elements.agentModelName) {
+    if (state.ollamaModel) {
+      elements.agentModelName.textContent = `(${state.ollamaModel})`;
+    } else {
+      elements.agentModelName.textContent = '';
+    }
+  }
+}
+
 async function handleOllamaModelChange(event) {
   state.ollamaModel = event.target.value;
+  updateAgentModelDisplay();
   await saveAllSettings();
 }
 
@@ -2153,7 +2207,10 @@ async function loadOllamaSettings() {
 
     // Render prompts and update agent dropdown
     renderPromptsList();
-    updateAgentQuickSelect();
+    updateAgentQuickMenu();
+
+    // Update agent model display
+    updateAgentModelDisplay();
   }
 }
 
@@ -2198,7 +2255,7 @@ function renderPromptsList() {
           // Update label from first few words
           prompt.label = newText.substring(0, 30) + (newText.length > 30 ? '...' : '');
           await saveAllSettings();
-          updateAgentQuickSelect();
+          updateAgentQuickMenu();
         }
       }
     });
@@ -2213,26 +2270,40 @@ function renderPromptsList() {
   });
 }
 
-function updateAgentQuickSelect() {
-  if (!elements.agentQuickSelect) return;
+function toggleAgentQuickMenu() {
+  const isActive = elements.agentQuickMenu.classList.toggle('active');
+  elements.agentQuickBtn.classList.toggle('active', isActive);
+}
 
-  // Save current value
-  const currentValue = elements.agentQuickSelect.value;
+function closeAgentQuickMenu() {
+  elements.agentQuickMenu.classList.remove('active');
+  elements.agentQuickBtn.classList.remove('active');
+}
 
-  // Clear and rebuild options
-  elements.agentQuickSelect.innerHTML = '<option value="">Quick Prompts...</option>';
+function updateAgentQuickMenu() {
+  if (!elements.agentQuickMenu) return;
+
+  // Clear and rebuild menu items
+  elements.agentQuickMenu.innerHTML = '';
 
   state.agentQuickPrompts.forEach(prompt => {
-    const option = document.createElement('option');
-    option.value = prompt.prompt;
-    option.textContent = prompt.label;
-    elements.agentQuickSelect.appendChild(option);
+    const button = document.createElement('button');
+    button.className = 'agent-quick-option';
+    button.dataset.prompt = prompt.prompt;
+    button.textContent = prompt.label;
+    elements.agentQuickMenu.appendChild(button);
   });
 
-  // Restore selection if it still exists
-  if (currentValue) {
-    elements.agentQuickSelect.value = currentValue;
-  }
+  // Add event listeners to new menu items
+  elements.agentQuickMenu.querySelectorAll('.agent-quick-option').forEach(option => {
+    option.addEventListener('click', (e) => {
+      const prompt = e.currentTarget.dataset.prompt;
+      if (prompt) {
+        sendAgentMessage(prompt);
+        closeAgentQuickMenu();
+      }
+    });
+  });
 }
 
 async function addPrompt() {
@@ -2249,7 +2320,7 @@ async function addPrompt() {
   state.agentQuickPrompts.push(newPrompt);
   await saveAllSettings();
   renderPromptsList();
-  updateAgentQuickSelect();
+  updateAgentQuickMenu();
 
   // Focus the new input
   setTimeout(() => {
@@ -2264,7 +2335,7 @@ async function deletePrompt(promptId) {
   state.agentQuickPrompts = state.agentQuickPrompts.filter(p => p.id !== promptId);
   await saveAllSettings();
   renderPromptsList();
-  updateAgentQuickSelect();
+  updateAgentQuickMenu();
 }
 
 // ========================================
@@ -2431,6 +2502,12 @@ async function sendAgentMessage(prompt) {
     elements.agentSendBtn.disabled = true;
   }
 
+  // Remove the initial greeting message if it exists
+  const greetingMessage = elements.agentMessages.querySelector('.agent-message-system');
+  if (greetingMessage && greetingMessage.textContent.includes('Ask me about your tasks!')) {
+    greetingMessage.remove();
+  }
+
   // Add user message
   addAgentMessage(prompt, 'user');
 
@@ -2508,17 +2585,6 @@ async function sendAgentMessage(prompt) {
   }
 }
 
-function handleAgentQuickPrompt() {
-  const prompt = elements.agentQuickSelect?.value;
-  if (prompt) {
-    sendAgentMessage(prompt);
-    // Reset the select to placeholder after sending
-    if (elements.agentQuickSelect) {
-      elements.agentQuickSelect.value = '';
-    }
-  }
-}
-
 // ========================================
 // Event Listeners
 // ========================================
@@ -2585,7 +2651,8 @@ function setupEventListeners() {
       const taskItem = e.target.closest('.task-item');
       const taskPath = taskItem.dataset.taskPath;
       const isDeleted = taskItem.dataset.taskDeleted === 'true';
-      deleteTask(taskPath, isDeleted);
+      const forcePermDelete = e.ctrlKey || e.metaKey; // Ctrl on Windows/Linux, Cmd on Mac
+      deleteTask(taskPath, isDeleted, forcePermDelete);
       return;
     }
 
@@ -2761,9 +2828,22 @@ function setupEventListeners() {
     });
   }
 
-  if (elements.agentQuickSelect) {
-    elements.agentQuickSelect.addEventListener('change', handleAgentQuickPrompt);
+  // Agent quick prompts button
+  if (elements.agentQuickBtn) {
+    elements.agentQuickBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleAgentQuickMenu();
+    });
   }
+
+  // Close quick menu when clicking outside
+  document.addEventListener('click', (e) => {
+    if (elements.agentQuickMenu &&
+        elements.agentQuickMenu.classList.contains('active') &&
+        !e.target.closest('.agent-quick-dropdown')) {
+      closeAgentQuickMenu();
+    }
+  });
 }
 
 // Helper function to find a task by ID
