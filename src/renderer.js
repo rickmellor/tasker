@@ -11,6 +11,8 @@ const state = {
   draggedTask: null, // Track task being dragged
   draggedFolder: null, // Track folder being dragged
   editingTask: null, // Track task being edited in modal
+  timelineZoom: 1.0, // Timeline zoom level (1.0 = 100%)
+  timelineCommits: [], // Current commits being displayed on timeline
   activeFilters: new Set(['all']), // Track active filters
   sortOrder: 'default', // Track sort order: default, priority, due-date, created
   sidebarWidth: 200, // Sidebar width in pixels
@@ -164,7 +166,22 @@ const elements = {
   agentSendBtn: document.getElementById('agent-send-btn'),
   agentQuickBtn: document.getElementById('agent-quick-btn'),
   agentQuickMenu: document.getElementById('agent-quick-menu'),
-  agentModelName: document.getElementById('agent-model-name')
+  agentModelName: document.getElementById('agent-model-name'),
+
+  // Timeline
+  timelineSection: document.getElementById('timeline-section'),
+  timelineContainer: document.getElementById('timeline-container'),
+  timelineTrack: document.getElementById('timeline-track'),
+  timelineTooltip: document.getElementById('timeline-tooltip'),
+
+  // Commit Modal
+  commitModal: document.getElementById('commit-modal'),
+  commitHash: document.getElementById('commit-hash'),
+  commitMessage: document.getElementById('commit-message'),
+  commitAuthor: document.getElementById('commit-author'),
+  commitDate: document.getElementById('commit-date'),
+  commitCancelBtn: document.getElementById('commit-cancel-btn'),
+  commitRollbackBtn: document.getElementById('commit-rollback-btn')
 };
 
 // ========================================
@@ -306,6 +323,9 @@ async function loadFoldersFromStorage() {
     // Load start minimized setting (default to true)
     state.startMinimized = result.config.startMinimized !== undefined ? result.config.startMinimized : true;
 
+    // Load timeline zoom (default to 1.0)
+    state.timelineZoom = result.config.timelineZoom || 1.0;
+
     // Load expanded tasks for current folder
     const expandedTasksData = result.config.expandedTasks || {};
     if (state.currentFolderId && expandedTasksData[state.currentFolderId]) {
@@ -363,7 +383,8 @@ async function saveAllSettings() {
       ollamaAvailable: state.ollamaAvailable,
       gitPath: state.gitPath,
       gitAvailable: state.gitAvailable,
-      agentQuickPrompts: state.agentQuickPrompts
+      agentQuickPrompts: state.agentQuickPrompts,
+      timelineZoom: state.timelineZoom
     });
   } finally {
     hideSavingIndicator();
@@ -476,26 +497,48 @@ async function saveAddFolder() {
   }
 }
 
-async function removeFolder(folderId) {
-  if (confirm('Are you sure you want to remove this folder? The files will not be deleted, only removed from this app.')) {
-    state.taskFolders = state.taskFolders.filter(f => f.id !== folderId);
+async function removeFolder(folderId, forcePermDelete = false) {
+  const folder = state.taskFolders.find(f => f.id === folderId);
+  if (!folder) return;
 
-    // If we removed the current folder, switch to another one or clear
-    if (state.currentFolderId === folderId) {
-      if (state.taskFolders.length > 0) {
-        state.currentFolderId = state.taskFolders[0].id;
-        await loadTasks();
-      } else {
-        state.currentFolderId = null;
-        state.tasks = [];
-        renderTasks();
+  if (forcePermDelete) {
+    // Permanent delete - no confirmation, delete from disk
+    try {
+      const result = await window.electronAPI.folders.permanentlyDelete(folder.path);
+      if (!result.success) {
+        alert('Failed to permanently delete folder: ' + result.error);
+        return;
       }
+    } catch (error) {
+      console.error('Error permanently deleting folder:', error);
+      alert('Error permanently deleting folder: ' + error.message);
+      return;
     }
-
-    saveFoldersToStorage();
-    renderSidebarFolders();
-    renderFolderList();
+  } else {
+    // Regular remove - show confirmation, keep files on disk
+    if (!confirm('Are you sure you want to remove this folder? The files will not be deleted, only removed from this app.')) {
+      return;
+    }
   }
+
+  // Remove folder from state
+  state.taskFolders = state.taskFolders.filter(f => f.id !== folderId);
+
+  // If we removed the current folder, switch to another one or clear
+  if (state.currentFolderId === folderId) {
+    if (state.taskFolders.length > 0) {
+      state.currentFolderId = state.taskFolders[0].id;
+      await loadTasks();
+    } else {
+      state.currentFolderId = null;
+      state.tasks = [];
+      renderTasks();
+    }
+  }
+
+  saveFoldersToStorage();
+  renderSidebarFolders();
+  renderFolderList();
 }
 
 async function renameFolder(folderId, newName) {
@@ -607,8 +650,9 @@ function renderFolderList() {
         <div class="folder-item-path" title="${escapeHtml(folder.path)}">${escapeHtml(folder.path)}</div>
       </div>
       <div class="folder-item-actions">
-        <button class="folder-item-btn" data-folder-id="${folder.id}" data-action="remove" title="Remove folder">
-          <span class="material-icons">delete</span>
+        <button class="folder-item-btn" data-folder-id="${folder.id}" data-action="remove" title="Remove folder (Ctrl+click to permanently delete from disk)">
+          <span class="material-icons folder-delete-icon">delete</span>
+          <span class="material-icons folder-delete-icon-permanent">delete_forever</span>
         </button>
       </div>
     </div>
@@ -629,7 +673,8 @@ function renderFolderList() {
   elements.folderList.querySelectorAll('[data-action="remove"]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const folderId = e.currentTarget.dataset.folderId;
-      removeFolder(folderId);
+      const forcePermDelete = e.ctrlKey || e.metaKey; // Ctrl on Windows/Linux, Cmd on Mac
+      removeFolder(folderId, forcePermDelete);
     });
   });
 }
@@ -881,9 +926,279 @@ async function commitTaskChange(message) {
     }
 
     console.log('Git commit successful:', message);
+
+    // Reload timeline to show the new commit
+    await loadTimeline();
   } catch (error) {
     console.error('Error committing to git:', error);
     // Don't block task operations if git fails
+  }
+}
+
+// ========================================
+// Git Timeline
+// ========================================
+async function loadTimeline() {
+  try {
+    const currentFolder = getCurrentFolder();
+
+    // Hide timeline if folder doesn't have version control
+    if (!currentFolder || !currentFolder.versionControl) {
+      elements.timelineSection.style.display = 'none';
+      state.timelineCommits = [];
+      return;
+    }
+
+    if (!state.gitPath || !state.gitAvailable) {
+      elements.timelineSection.style.display = 'none';
+      state.timelineCommits = [];
+      return;
+    }
+
+    // Load git history
+    const result = await window.electronAPI.git.log(state.gitPath, currentFolder.path);
+
+    if (!result.success || !result.commits || result.commits.length === 0) {
+      elements.timelineSection.style.display = 'none';
+      state.timelineCommits = [];
+      return;
+    }
+
+    // Store commits in state and show timeline
+    state.timelineCommits = result.commits;
+    elements.timelineSection.style.display = 'block';
+    renderTimeline(result.commits);
+    updateZoomDisplay();
+  } catch (error) {
+    console.error('Error loading timeline:', error);
+    elements.timelineSection.style.display = 'none';
+    state.timelineCommits = [];
+  }
+}
+
+function renderTimeline(commits) {
+  if (!commits || commits.length === 0) {
+    elements.timelineTrack.innerHTML = '';
+    return;
+  }
+
+  // Debug: Log commit order before reversing
+  console.log('Commits from git (newest first):', commits.slice(0, 3).map(c => ({
+    date: c.date,
+    message: c.message.substring(0, 50)
+  })));
+
+  // Reverse commits so oldest is first (left side)
+  const sortedCommits = [...commits].reverse();
+
+  // Debug: Log commit order after reversing
+  console.log('Commits after reverse (oldest first):', sortedCommits.slice(0, 3).map(c => ({
+    date: c.date,
+    message: c.message.substring(0, 50)
+  })));
+
+  // Calculate time range using only commit timestamps (never "now")
+  const firstCommitTime = new Date(sortedCommits[0].date).getTime();
+  const lastCommitTime = new Date(sortedCommits[sortedCommits.length - 1].date).getTime();
+  const timeRange = lastCommitTime - firstCommitTime;
+
+  // Debug: Log the time range to verify we're using commit timestamps
+  console.log('Timeline range:', {
+    oldest: new Date(firstCommitTime).toISOString(),
+    newest: new Date(lastCommitTime).toISOString(),
+    rangeInDays: timeRange / (1000 * 60 * 60 * 24),
+    commitCount: sortedCommits.length
+  });
+
+  // Get container width and calculate usable space (accounting for padding)
+  const containerWidth = elements.timelineContainer.clientWidth;
+  const padding = 40; // 40px padding on each side
+  const usableWidth = containerWidth - (padding * 2);
+
+  // Calculate minimum width needed to prevent overlap
+  // Each commit needs ~80px of space, scaled by zoom level
+  const minUsableWidth = sortedCommits.length * 80 * state.timelineZoom;
+  const trackWidth = Math.max(minUsableWidth + (padding * 2), containerWidth);
+  const actualUsableWidth = trackWidth - (padding * 2);
+
+  // Build HTML with line spanning from padding to padding
+  let html = `<div class="timeline-line" style="left: ${padding}px; right: ${padding}px;"></div>`;
+
+  sortedCommits.forEach((commit, index) => {
+    const commitTime = new Date(commit.date).getTime();
+
+    // Calculate position as pixels from left padding
+    let positionInUsableSpace;
+    if (timeRange > 0 && sortedCommits.length > 1) {
+      // Proportional positioning based on time
+      positionInUsableSpace = ((commitTime - firstCommitTime) / timeRange) * actualUsableWidth;
+    } else {
+      // Equal spacing if no time range or single commit
+      positionInUsableSpace = sortedCommits.length === 1 ? actualUsableWidth / 2 : (index / (sortedCommits.length - 1)) * actualUsableWidth;
+    }
+
+    const absolutePosition = padding + positionInUsableSpace;
+
+    const isFirst = index === 0;
+    const commitDate = new Date(commit.date);
+    const formattedDate = commitDate.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: commitDate.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
+    });
+
+    html += `
+      <div class="timeline-point ${isFirst ? 'first-commit' : ''}"
+           style="left: ${absolutePosition}px"
+           data-commit-hash="${commit.hash}"
+           data-commit-author="${commit.author}"
+           data-commit-date="${commit.date}"
+           data-commit-message="${escapeHtml(commit.message)}">
+        <div class="timeline-date">${formattedDate}</div>
+      </div>
+    `;
+  });
+
+  elements.timelineTrack.innerHTML = html;
+  elements.timelineTrack.style.width = `${trackWidth}px`;
+
+  // Add click and hover handlers to timeline points
+  const timelinePoints = elements.timelineTrack.querySelectorAll('.timeline-point');
+  timelinePoints.forEach(point => {
+    // Click handler for modal
+    point.addEventListener('click', () => {
+      const commitData = {
+        hash: point.dataset.commitHash,
+        author: point.dataset.commitAuthor,
+        date: point.dataset.commitDate,
+        message: point.dataset.commitMessage
+      };
+      openCommitModal(commitData);
+    });
+
+    // Hover handlers for tooltip
+    point.addEventListener('mouseenter', (e) => {
+      const message = point.dataset.commitMessage;
+      const rect = point.getBoundingClientRect();
+
+      // Show tooltip
+      elements.timelineTooltip.textContent = message;
+      elements.timelineTooltip.style.display = 'block';
+
+      // Position tooltip above the point
+      const tooltipRect = elements.timelineTooltip.getBoundingClientRect();
+      const left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+      const top = rect.top - tooltipRect.height - 8;
+
+      elements.timelineTooltip.style.left = `${left}px`;
+      elements.timelineTooltip.style.top = `${top}px`;
+    });
+
+    point.addEventListener('mouseleave', () => {
+      elements.timelineTooltip.style.display = 'none';
+    });
+  });
+}
+
+function zoomTimelineIn() {
+  const maxZoom = 20.0; // Increased from 5.0 to 20.0 (2000% zoom)
+  const zoomStep = 0.25;
+
+  state.timelineZoom = Math.min(state.timelineZoom + zoomStep, maxZoom);
+
+  if (state.timelineCommits.length > 0) {
+    renderTimeline(state.timelineCommits);
+  }
+
+  updateZoomDisplay();
+  saveAllSettings();
+}
+
+function zoomTimelineOut() {
+  const minZoom = 0.5;
+  const zoomStep = 0.25;
+
+  state.timelineZoom = Math.max(state.timelineZoom - zoomStep, minZoom);
+
+  if (state.timelineCommits.length > 0) {
+    renderTimeline(state.timelineCommits);
+  }
+
+  updateZoomDisplay();
+  saveAllSettings();
+}
+
+function resetTimelineZoom() {
+  state.timelineZoom = 1.0;
+
+  if (state.timelineCommits.length > 0) {
+    renderTimeline(state.timelineCommits);
+  }
+
+  updateZoomDisplay();
+  saveAllSettings();
+}
+
+function updateZoomDisplay() {
+  // No UI element to update, but keep function for consistency
+}
+
+function openCommitModal(commit) {
+  // Populate modal fields
+  elements.commitHash.value = commit.hash;
+  elements.commitMessage.value = commit.message;
+  elements.commitAuthor.value = commit.author;
+
+  const commitDate = new Date(commit.date);
+  elements.commitDate.value = commitDate.toLocaleString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  // Store commit hash for rollback
+  elements.commitModal.dataset.commitHash = commit.hash;
+
+  // Show modal
+  elements.commitModal.classList.add('active');
+}
+
+function closeCommitModal() {
+  elements.commitModal.classList.remove('active');
+  delete elements.commitModal.dataset.commitHash;
+}
+
+async function handleRollback() {
+  const commitHash = elements.commitModal.dataset.commitHash;
+  if (!commitHash) return;
+
+  const currentFolder = getCurrentFolder();
+  if (!currentFolder || !currentFolder.versionControl) {
+    alert('No folder with version control selected');
+    return;
+  }
+
+  if (!confirm('Are you sure you want to rollback to this commit? This will reset all tasks in this folder to the state at this commit. Any changes made after this commit will be lost. This action cannot be undone.')) {
+    return;
+  }
+
+  try {
+    const result = await window.electronAPI.git.reset(state.gitPath, currentFolder.path, commitHash);
+
+    if (result.success) {
+      alert('Rollback successful. Tasks have been reset to the selected commit.');
+      closeCommitModal();
+      await loadTasks(); // Reload tasks from disk
+      await loadTimeline(); // Reload timeline
+    } else {
+      alert('Rollback failed: ' + result.error);
+    }
+  } catch (error) {
+    console.error('Error during rollback:', error);
+    alert('Error during rollback: ' + error.message);
   }
 }
 
@@ -899,6 +1214,7 @@ async function loadTasks() {
       renderTasks();
       updateProfileStats();
       updateDeletedCount();
+      await loadTimeline(); // Load git timeline
     } else {
       console.error('Failed to load tasks:', result.error);
     }
@@ -1666,6 +1982,12 @@ async function handleDrop(e) {
     return; // Can't drop on itself
   }
 
+  // Get task info before moving for commit message
+  const draggedTask = findTaskByPath(state.tasks, state.draggedTask.path);
+  const targetTask = findTaskByPath(state.tasks, targetPath);
+  const draggedTitle = draggedTask ? draggedTask.title : 'Unknown task';
+  const targetTitle = targetTask ? targetTask.title : 'Unknown task';
+
   const rect = taskItem.getBoundingClientRect();
   const midpoint = rect.top + rect.height / 2;
 
@@ -1680,6 +2002,9 @@ async function handleDrop(e) {
       if (moveResult.success) {
         // Now reorder within the new parent
         await reorderTasks(moveResult.newPath, targetPath);
+
+        // Commit to git if version control is enabled
+        await commitTaskChange(`Move task "${draggedTitle}" to sibling of "${targetTitle}"`);
       }
     } else {
       // Drop below - make it a child
@@ -1693,6 +2018,9 @@ async function handleDrop(e) {
         const targetId = parseInt(taskItem.dataset.taskId);
         state.expandedTasks.add(targetId);
         await loadTasks();
+
+        // Commit to git if version control is enabled
+        await commitTaskChange(`Move task "${draggedTitle}" to child of "${targetTitle}"`);
       }
     }
   } catch (error) {
@@ -2025,12 +2353,21 @@ function setupHotkeyRecorder() {
 // Keyboard Shortcuts
 // ========================================
 function updateDeleteButtonStates() {
-  // Update all delete button appearances based on Ctrl key state
+  // Update all task delete button appearances based on Ctrl key state
   document.querySelectorAll('.task-delete').forEach(btn => {
     const taskItem = btn.closest('.task-item');
     const isDeleted = taskItem?.dataset.taskDeleted === 'true';
 
     if (state.ctrlKeyPressed && !isDeleted) {
+      btn.classList.add('permanent-delete');
+    } else {
+      btn.classList.remove('permanent-delete');
+    }
+  });
+
+  // Update all folder delete button appearances based on Ctrl key state
+  document.querySelectorAll('.folder-item-btn').forEach(btn => {
+    if (state.ctrlKeyPressed) {
       btn.classList.add('permanent-delete');
     } else {
       btn.classList.remove('permanent-delete');
@@ -3001,6 +3338,17 @@ function setupEventListeners() {
     }
   });
 
+  // Commit Modal
+  elements.commitCancelBtn.addEventListener('click', closeCommitModal);
+  elements.commitRollbackBtn.addEventListener('click', handleRollback);
+
+  // Close commit modal when clicking outside
+  elements.commitModal.addEventListener('click', (e) => {
+    if (e.target === elements.commitModal) {
+      closeCommitModal();
+    }
+  });
+
   // Escape key to close modals
   document.addEventListener('keydown', async (e) => {
     if (e.key === 'Escape') {
@@ -3016,6 +3364,8 @@ function setupEventListeners() {
         closeTaskModal();
       } else if (elements.addFolderModal.classList.contains('active')) {
         closeAddFolderModal();
+      } else if (elements.commitModal.classList.contains('active')) {
+        closeCommitModal();
       }
     }
   });
@@ -3060,6 +3410,40 @@ function setupEventListeners() {
       closeAgentQuickMenu();
     }
   });
+
+  // Timeline zoom controls
+  const zoomInBtn = document.getElementById('timeline-zoom-in');
+  const zoomOutBtn = document.getElementById('timeline-zoom-out');
+  const zoomResetBtn = document.getElementById('timeline-zoom-reset');
+
+  if (zoomInBtn) {
+    zoomInBtn.addEventListener('click', zoomTimelineIn);
+  }
+
+  if (zoomOutBtn) {
+    zoomOutBtn.addEventListener('click', zoomTimelineOut);
+  }
+
+  if (zoomResetBtn) {
+    zoomResetBtn.addEventListener('click', resetTimelineZoom);
+  }
+
+  // Mouse wheel zoom on timeline (Ctrl+Wheel)
+  if (elements.timelineContainer) {
+    elements.timelineContainer.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+
+        if (e.deltaY < 0) {
+          // Scrolling up - zoom in
+          zoomTimelineIn();
+        } else {
+          // Scrolling down - zoom out
+          zoomTimelineOut();
+        }
+      }
+    }, { passive: false });
+  }
 }
 
 // Helper function to find a task by ID

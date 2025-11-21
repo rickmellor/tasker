@@ -172,6 +172,18 @@
                   <p class="empty-state">No tasks yet. Add one above!</p>
                 </div>
               </section>
+
+              <!-- Git Timeline Ribbon -->
+              <section class="timeline-section" id="timeline-section" style="display: none;">
+                <div class="timeline-container" id="timeline-container">
+                  <div class="timeline-track" id="timeline-track">
+                    <!-- Timeline points will be rendered here -->
+                  </div>
+                </div>
+              </section>
+
+              <!-- Timeline Tooltip (positioned globally) -->
+              <div id="timeline-tooltip" class="timeline-tooltip-global" style="display: none;"></div>
             </div>
           </div>
 
@@ -274,6 +286,14 @@
                     <span class="shortcut-description">Permanently delete task and all children (cannot be undone)</span>
                   </div>
                 </div>
+
+                <div class="shortcuts-section">
+                  <h4>Timeline Controls</h4>
+                  <div class="shortcut-item">
+                    <kbd>Ctrl</kbd> + <span style="font-size: 0.9rem;">Mouse Wheel</span>
+                    <span class="shortcut-description">Zoom in or out on the timeline (for folders with version control)</span>
+                  </div>
+                </div>
               </div>
 
               <div class="settings-section">
@@ -290,6 +310,9 @@
                   <h4>Task Folders</h4>
                   <p class="setting-description" style="margin-bottom: 0.5rem;">
                     <strong>Managing Folders:</strong> Organize tasks into separate folders for different projects or contexts. Click "Add Folder" to create a new task folder, specify the storage location, and optionally enable version control for that folder.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Removing Folders:</strong> Click the delete button to remove a folder from Tasker (files remain on disk). Hold Ctrl while clicking the delete button (which turns yellow) to permanently delete the folder and all its contents from disk. No confirmation is required for permanent deletion.
                   </p>
                   <p class="setting-description" style="margin-bottom: 0.5rem;">
                     <strong>Version Control:</strong> When adding a folder, check "Enable version control" to initialize a Git repository. This allows you to track changes to your tasks over time. Git must be configured first before this option is available.
@@ -346,6 +369,51 @@
                   </p>
                   <p class="setting-description" style="margin-bottom: 0.5rem;">
                     <strong>Download:</strong> If you don't have Git installed, click the download link to get Git for Windows.
+                  </p>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>Version Control Features</h4>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Automatic Commits:</strong> When version control is enabled on a folder, Tasker automatically commits changes to Git whenever you create, update, move, or delete tasks. Each commit includes a descriptive message about what changed (e.g., "Create task: Project Alpha" or "Move task to child of Setup").
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Timeline View:</strong> Folders with version control show a timeline ribbon at the bottom of the Tasks view. This timeline displays your commit history visually as points on a horizontal timeline, ordered chronologically from left (oldest) to right (newest).
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>First Commit Badge:</strong> The first commit in a repository is highlighted in green to mark the beginning of your version history.
+                  </p>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>Using the Timeline</h4>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Hover for Details:</strong> Move your mouse over any point on the timeline to see a tooltip with the commit message. This gives you a quick preview without needing to click.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Click for Full Details:</strong> Click on any timeline point to open a modal showing complete commit information including the full commit hash, author, date, and message.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Timeline Zoom:</strong> Hold Ctrl (or Cmd on Mac) and scroll your mouse wheel while hovering over the timeline to zoom in or out. This helps you see closely-packed commits more clearly. Zoom ranges from 50% to 2000%.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Timeline Position:</strong> Commits are positioned proportionally based on their timestamps. If commits are close together in time, their timeline points will be close together visually.
+                  </p>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>Rollback Feature</h4>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>What is Rollback:</strong> The rollback feature lets you restore your tasks to any previous commit state. When you rollback, all task files in the folder are reset to exactly how they were at that point in time.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>How to Rollback:</strong> Click on a timeline point to view the commit details, then click "Rollback to This Commit" button. A confirmation dialog will warn you about the consequences before proceeding.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>⚠️ IMPORTANT WARNING:</strong> Rollback is destructive and cannot be undone. Any changes made after the selected commit will be permanently lost. Make sure you really want to go back before confirming the rollback.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>After Rollback:</strong> After a rollback, your tasks will be in the exact state they were at the selected commit. The timeline will show all commits up to that point. Later commits are preserved in Git's reflog but won't appear on the timeline.
                   </p>
                 </div>
 
@@ -689,6 +757,50 @@
           <button id="modal-undelete-btn" class="btn-secondary" style="margin-right: auto; display: none;">Undelete</button>
           <button id="modal-cancel-btn" class="btn-secondary">Cancel</button>
           <button id="modal-save-btn" class="btn-primary">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Commit Details Modal -->
+    <div id="commit-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Commit Details</h2>
+        </div>
+
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Commit Hash</label>
+            <input type="text" id="commit-hash" class="input-lg" readonly disabled />
+          </div>
+
+          <div class="form-group">
+            <label>Message</label>
+            <textarea id="commit-message" class="textarea-lg" rows="3" readonly disabled></textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Author</label>
+              <input type="text" id="commit-author" class="input-lg" readonly disabled />
+            </div>
+
+            <div class="form-group">
+              <label>Date</label>
+              <input type="text" id="commit-date" class="input-lg" readonly disabled />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <p class="setting-description" style="margin-top: 1rem; color: var(--danger);">
+              <strong>Warning:</strong> Rollback will reset all tasks in this folder to the state at this commit. Any changes made after this commit will be lost. This action cannot be undone.
+            </p>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="commit-cancel-btn" class="btn-secondary">Cancel</button>
+          <button id="commit-rollback-btn" class="btn-primary" style="background: var(--danger); border-color: var(--danger);">Rollback to This Commit</button>
         </div>
       </div>
     </div>

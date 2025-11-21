@@ -119,9 +119,23 @@ async function createWindow() {
 
 }
 
+function getTrayIconPath() {
+  // Use white icon for dark system themes, black icon for light themes
+  const iconName = nativeTheme.shouldUseDarkColors ? 'tasks-dark.png' : 'tasks.png';
+  return path.join(__dirname, '../assets', iconName);
+}
+
+function updateTrayIcon() {
+  if (tray && !tray.isDestroyed()) {
+    const iconPath = getTrayIconPath();
+    tray.setImage(iconPath);
+    console.log('Tray icon updated for theme:', nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+  }
+}
+
 function createTray() {
-  // Create tray icon
-  const iconPath = path.join(__dirname, '../assets/tasks.png');
+  // Create tray icon with appropriate icon for current system theme
+  const iconPath = getTrayIconPath();
   tray = new Tray(iconPath);
 
   // Set tooltip
@@ -281,6 +295,12 @@ function registerGlobalHotkey(accelerator) {
 app.whenReady().then(async () => {
   createWindow();
   createTray();
+
+  // Listen for system theme changes and update tray icon
+  nativeTheme.on('updated', () => {
+    console.log('System theme changed, updating tray icon');
+    updateTrayIcon();
+  });
 
   // Wait a bit for the window to be fully ready, then initialize settings
   setTimeout(() => {
@@ -922,16 +942,17 @@ ipcMain.handle('git:add', async (_event, gitPath, folderPath, files = ['.']) => 
     const pollInterval = 50; // Check every 50ms
     let elapsed = 0;
 
+    // Build git status command with explicit work-tree and git-dir
     let statusCommand;
     if (process.platform === 'win32' && gitPath.includes(':\\')) {
       if (gitPath.includes(' ')) {
-        statusCommand = `cmd.exe /c "cd /d "${folderPath}" && "${gitPath}" status --short"`;
+        statusCommand = `cmd.exe /c ""${gitPath}" --git-dir="${folderPath}/.git" --work-tree="${folderPath}" status --short"`;
       } else {
-        statusCommand = `cmd.exe /c cd /d "${folderPath}" && ${gitPath} status --short`;
+        statusCommand = `cmd.exe /c ${gitPath} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" status --short`;
       }
     } else {
       const gitCmd = gitPath.includes(' ') ? `"${gitPath}"` : gitPath;
-      statusCommand = `cd "${folderPath}" && ${gitCmd} status --short`;
+      statusCommand = `${gitCmd} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" status --short`;
     }
 
     // Poll until git sees changes
@@ -964,18 +985,18 @@ ipcMain.handle('git:add', async (_event, gitPath, folderPath, files = ['.']) => 
     // Default to '.' to add all changes
     const filesToAdd = Array.isArray(files) ? files.join(' ') : files;
 
-    // Build the git add command
+    // Build the git add command with explicit work-tree and git-dir
     let command;
     if (process.platform === 'win32' && gitPath.includes(':\\')) {
       // On Windows, use cmd.exe to execute Windows paths
       if (gitPath.includes(' ')) {
-        command = `cmd.exe /c "cd /d "${folderPath}" && "${gitPath}" add ${filesToAdd}"`;
+        command = `cmd.exe /c ""${gitPath}" --git-dir="${folderPath}/.git" --work-tree="${folderPath}" add ${filesToAdd}"`;
       } else {
-        command = `cmd.exe /c cd /d "${folderPath}" && ${gitPath} add ${filesToAdd}`;
+        command = `cmd.exe /c ${gitPath} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" add ${filesToAdd}`;
       }
     } else {
       const gitCmd = gitPath.includes(' ') ? `"${gitPath}"` : gitPath;
-      command = `cd "${folderPath}" && ${gitCmd} add ${filesToAdd}`;
+      command = `${gitCmd} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" add ${filesToAdd}`;
     }
 
     console.log(`Running git add: ${command}`);
@@ -995,21 +1016,21 @@ ipcMain.handle('git:add', async (_event, gitPath, folderPath, files = ['.']) => 
 
 ipcMain.handle('git:commit', async (_event, gitPath, folderPath, message) => {
   try {
-    // Build the git commit command
+    // Build the git commit command with explicit work-tree and git-dir
     let command;
     if (process.platform === 'win32' && gitPath.includes(':\\')) {
       // On Windows, use cmd.exe to execute Windows paths
       // Escape quotes in commit message
       const escapedMessage = message.replace(/"/g, '\\"');
       if (gitPath.includes(' ')) {
-        command = `cmd.exe /c "cd /d "${folderPath}" && "${gitPath}" commit -m "${escapedMessage}""`;
+        command = `cmd.exe /c ""${gitPath}" --git-dir="${folderPath}/.git" --work-tree="${folderPath}" commit -m "${escapedMessage}""`;
       } else {
-        command = `cmd.exe /c cd /d "${folderPath}" && ${gitPath} commit -m "${escapedMessage}"`;
+        command = `cmd.exe /c ${gitPath} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" commit -m "${escapedMessage}"`;
       }
     } else {
       const gitCmd = gitPath.includes(' ') ? `"${gitPath}"` : gitPath;
       const escapedMessage = message.replace(/"/g, '\\"');
-      command = `cd "${folderPath}" && ${gitCmd} commit -m "${escapedMessage}"`;
+      command = `${gitCmd} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" commit -m "${escapedMessage}"`;
     }
 
     console.log(`Running git commit: ${command}`);
@@ -1031,6 +1052,92 @@ ipcMain.handle('git:commit', async (_event, gitPath, folderPath, message) => {
       return { success: true, output: 'Nothing to commit' };
     }
     console.error('Error committing git changes:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Folder Management IPC handlers
+
+ipcMain.handle('folders:permanently-delete', async (_event, folderPath) => {
+  try {
+    // Recursively delete the folder and all its contents
+    await fs.rm(folderPath, { recursive: true, force: true });
+    console.log(`Permanently deleted folder: ${folderPath}`);
+    return { success: true };
+  } catch (error) {
+    console.error('Error permanently deleting folder:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('git:log', async (_event, gitPath, folderPath) => {
+  try {
+    // Build git log command with explicit work-tree and git-dir
+    // Format: hash|author|date|message
+    // Use --reflog --all to show all commits including those reset away from
+    let command;
+    const format = '--pretty=format:%H|%an|%aI|%s';
+
+    if (process.platform === 'win32' && gitPath.includes(':\\')) {
+      // On Windows, use PowerShell with proper escaping
+      // Use single quotes around the format string to prevent PowerShell variable expansion
+      const psCommand = `& '${gitPath}' --git-dir='${folderPath}/.git' --work-tree='${folderPath}' log --reflog --all '--pretty=format:%H|%an|%aI|%s'`;
+      command = `powershell.exe -NoProfile -Command "${psCommand}"`;
+    } else {
+      const gitCmd = gitPath.includes(' ') ? `"${gitPath}"` : gitPath;
+      command = `${gitCmd} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" log --reflog --all ${format}`;
+    }
+
+    const { stdout, stderr } = await execAsync(command, { timeout: 10000 });
+
+    if (stderr && stderr.trim()) {
+      console.log(`Git log stderr: ${stderr}`);
+    }
+
+    // Parse log output
+    const commits = [];
+    if (stdout && stdout.trim()) {
+      const lines = stdout.trim().split('\n');
+      for (const line of lines) {
+        const [hash, author, date, message] = line.split('|');
+        commits.push({ hash, author, date, message });
+      }
+    }
+
+    return { success: true, commits };
+  } catch (error) {
+    console.error('Error getting git log:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('git:reset', async (_event, gitPath, folderPath, commitHash) => {
+  try {
+    // Build git reset command with explicit work-tree and git-dir
+    let command;
+
+    if (process.platform === 'win32' && gitPath.includes(':\\')) {
+      if (gitPath.includes(' ')) {
+        command = `cmd.exe /c ""${gitPath}" --git-dir="${folderPath}/.git" --work-tree="${folderPath}" reset --hard ${commitHash}"`;
+      } else {
+        command = `cmd.exe /c ${gitPath} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" reset --hard ${commitHash}`;
+      }
+    } else {
+      const gitCmd = gitPath.includes(' ') ? `"${gitPath}"` : gitPath;
+      command = `${gitCmd} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" reset --hard ${commitHash}`;
+    }
+
+    console.log(`Running git reset: ${command}`);
+    const { stdout, stderr } = await execAsync(command, { timeout: 10000 });
+
+    console.log(`Git reset output: ${stdout}`);
+    if (stderr && stderr.trim()) {
+      console.log(`Git reset stderr: ${stderr}`);
+    }
+
+    return { success: true, output: stdout.trim() };
+  } catch (error) {
+    console.error('Error resetting git repository:', error);
     return { success: false, error: error.message };
   }
 });

@@ -969,6 +969,11 @@ body[data-theme="dark"] .folder-git-icon-dark {
   padding: 2rem;
 }
 
+/* Add bottom padding to tasks view to account for fixed timeline */
+#tasks-view .view-content {
+  padding-bottom: 5rem;
+}
+
 /* ========================================
    Buttons
    ======================================== */
@@ -1605,6 +1610,34 @@ body[data-theme="dark"] .folder-git-badge-icon-dark {
   font-size: 18px;
 }
 
+.folder-delete-icon {
+  display: block;
+}
+
+.folder-delete-icon-permanent {
+  display: none;
+}
+
+/* Permanent delete mode for folders when Ctrl is pressed */
+.folder-item-btn.permanent-delete {
+  color: #1a1a1a;
+}
+
+.folder-item-btn.permanent-delete .folder-delete-icon {
+  display: none;
+}
+
+.folder-item-btn.permanent-delete .folder-delete-icon-permanent {
+  display: block;
+}
+
+.folder-item-btn.permanent-delete:hover {
+  background: #FFD700;
+  color: #1a1a1a;
+  border-color: #FFD700;
+  box-shadow: 0 0 8px rgba(255, 215, 0, 0.6);
+}
+
 /* Prompt List */
 .prompt-item {
   display: flex;
@@ -1679,6 +1712,104 @@ body[data-theme="dark"] .folder-git-badge-icon-dark {
 
 .prompt-item-btn .material-icons {
   font-size: 18px;
+}
+
+/* ========================================
+   Git Timeline
+   ======================================== */
+.timeline-section {
+  position: fixed;
+  bottom: 0;
+  left: var(--sidebar-width);
+  right: 0;
+  border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  padding: 0.5rem 1rem 0.5rem 1rem;
+  z-index: 100;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.timeline-container {
+  position: relative;
+  height: 50px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.timeline-track {
+  position: relative;
+  height: 50px;
+  min-width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.timeline-line {
+  position: absolute;
+  top: 50%;
+  height: 2px;
+  background: var(--border-color);
+  transform: translateY(-50%);
+}
+
+.timeline-point {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--accent-primary);
+  border: 2px solid var(--bg-primary);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+}
+
+.timeline-point:hover {
+  width: 16px;
+  height: 16px;
+  background: var(--accent-hover);
+  box-shadow: 0 0 8px rgba(77, 163, 255, 0.5);
+  z-index: 20;
+}
+
+.timeline-point.first-commit {
+  background: var(--success);
+}
+
+.timeline-point.first-commit:hover {
+  background: #3dc75f;
+}
+
+/* Global tooltip positioned relative to viewport */
+.timeline-tooltip-global {
+  position: fixed;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+}
+
+.timeline-date {
+  position: absolute;
+  bottom: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 /* ========================================
@@ -1760,10 +1891,10 @@ body[data-theme="dark"] .folder-git-badge-icon-dark {
 
 .form-row {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: 1fr 1fr;
   gap: 1rem;
   margin-bottom: 1.25rem;
-  align-items: end;
+  align-items: start;
 }
 
 .form-row .form-group label {

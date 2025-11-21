@@ -73,6 +73,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     selectFile: () => ipcRenderer.invoke('git:select-file'),
     init: (gitPath, folderPath) => ipcRenderer.invoke('git:init', gitPath, folderPath),
     add: (gitPath, folderPath, files) => ipcRenderer.invoke('git:add', gitPath, folderPath, files),
-    commit: (gitPath, folderPath, message) => ipcRenderer.invoke('git:commit', gitPath, folderPath, message)
+    commit: (gitPath, folderPath, message) => ipcRenderer.invoke('git:commit', gitPath, folderPath, message),
+    log: (gitPath, folderPath) => ipcRenderer.invoke('git:log', gitPath, folderPath),
+    reset: (gitPath, folderPath, commitHash) => ipcRenderer.invoke('git:reset', gitPath, folderPath, commitHash)
+  },
+
+  // Folders
+  folders: {
+    permanentlyDelete: (folderPath) => ipcRenderer.invoke('folders:permanently-delete', folderPath)
   }
 });
