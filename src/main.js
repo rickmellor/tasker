@@ -813,3 +813,177 @@ Use markdown-style formatting: **bold**, *italic*, bullet points (•), numbered
     };
   }
 });
+
+// Git IPC handlers
+
+async function detectGit() {
+  // Try common locations for git
+  const commonPaths = [
+    'git', // Check PATH first
+    'C:\\Program Files\\Git\\cmd\\git.exe',
+    'C:\\Program Files\\Git\\bin\\git.exe',
+    'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\git.exe',
+    'C:\\Users\\' + require('os').userInfo().username + '\\AppData\\Local\\Programs\\Git\\cmd\\git.exe',
+    'C:\\Users\\' + require('os').userInfo().username + '\\AppData\\Local\\Programs\\Git\\bin\\git.exe',
+    '/usr/bin/git',
+    '/usr/local/bin/git',
+    '/opt/homebrew/bin/git'
+  ];
+
+  for (const gitPath of commonPaths) {
+    try {
+      // Try to run git --version
+      let command;
+      if (process.platform === 'win32' && gitPath.includes(':\\')) {
+        // On Windows, use cmd.exe to execute Windows paths
+        // Need to wrap entire command in quotes when path has spaces
+        if (gitPath.includes(' ')) {
+          command = `cmd.exe /c ""${gitPath}" --version"`;
+        } else {
+          command = `cmd.exe /c ${gitPath} --version`;
+        }
+      } else {
+        command = gitPath.includes(' ') ? `"${gitPath}" --version` : `${gitPath} --version`;
+      }
+
+      console.log(`Trying git command: ${command}`);
+      const { stdout } = await execAsync(command, { timeout: 5000 });
+
+      if (stdout) {
+        console.log(`Found git at: ${gitPath}`);
+        return { success: true, path: gitPath, version: stdout.trim() };
+      }
+    } catch (error) {
+      console.log(`Failed to detect git at ${gitPath}: ${error.message}`);
+      // Continue to next path
+      continue;
+    }
+  }
+
+  return { success: false, error: 'Git not found. Please install Git or specify the path manually.' };
+}
+
+ipcMain.handle('git:detect', async () => {
+  return await detectGit();
+});
+
+ipcMain.handle('git:select-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Git Executable',
+    filters: [
+      { name: 'Executable', extensions: process.platform === 'win32' ? ['exe'] : ['*'] }
+    ],
+    properties: ['openFile']
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  return null;
+});
+
+ipcMain.handle('git:init', async (_event, gitPath, folderPath) => {
+  try {
+    // Build the git init command
+    let command;
+    if (process.platform === 'win32' && gitPath.includes(':\\')) {
+      // On Windows, use cmd.exe to execute Windows paths
+      if (gitPath.includes(' ')) {
+        command = `cmd.exe /c ""${gitPath}" init "${folderPath}""`;
+      } else {
+        command = `cmd.exe /c ${gitPath} init "${folderPath}"`;
+      }
+    } else {
+      command = gitPath.includes(' ') ? `"${gitPath}" init "${folderPath}"` : `${gitPath} init "${folderPath}"`;
+    }
+
+    console.log(`Running git init: ${command}`);
+    const { stdout, stderr } = await execAsync(command, { timeout: 10000 });
+
+    console.log(`Git init output: ${stdout}`);
+    if (stderr && stderr.trim()) {
+      console.log(`Git init stderr: ${stderr}`);
+    }
+
+    return { success: true, output: stdout.trim() };
+  } catch (error) {
+    console.error('Error initializing git repository:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('git:add', async (_event, gitPath, folderPath, files = ['.']) => {
+  try {
+    // files parameter can be an array of file paths or a single path
+    // Default to '.' to add all changes
+    const filesToAdd = Array.isArray(files) ? files.join(' ') : files;
+
+    // Build the git add command
+    let command;
+    if (process.platform === 'win32' && gitPath.includes(':\\')) {
+      // On Windows, use cmd.exe to execute Windows paths
+      if (gitPath.includes(' ')) {
+        command = `cmd.exe /c "cd /d "${folderPath}" && "${gitPath}" add ${filesToAdd}"`;
+      } else {
+        command = `cmd.exe /c cd /d "${folderPath}" && ${gitPath} add ${filesToAdd}`;
+      }
+    } else {
+      const gitCmd = gitPath.includes(' ') ? `"${gitPath}"` : gitPath;
+      command = `cd "${folderPath}" && ${gitCmd} add ${filesToAdd}`;
+    }
+
+    console.log(`Running git add: ${command}`);
+    const { stdout, stderr } = await execAsync(command, { timeout: 10000 });
+
+    if (stdout) console.log(`Git add output: ${stdout}`);
+    if (stderr && stderr.trim()) {
+      console.log(`Git add stderr: ${stderr}`);
+    }
+
+    return { success: true, output: stdout ? stdout.trim() : '' };
+  } catch (error) {
+    console.error('Error staging git changes:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('git:commit', async (_event, gitPath, folderPath, message) => {
+  try {
+    // Build the git commit command
+    let command;
+    if (process.platform === 'win32' && gitPath.includes(':\\')) {
+      // On Windows, use cmd.exe to execute Windows paths
+      // Escape quotes in commit message
+      const escapedMessage = message.replace(/"/g, '\\"');
+      if (gitPath.includes(' ')) {
+        command = `cmd.exe /c "cd /d "${folderPath}" && "${gitPath}" commit -m "${escapedMessage}""`;
+      } else {
+        command = `cmd.exe /c cd /d "${folderPath}" && ${gitPath} commit -m "${escapedMessage}"`;
+      }
+    } else {
+      const gitCmd = gitPath.includes(' ') ? `"${gitPath}"` : gitPath;
+      const escapedMessage = message.replace(/"/g, '\\"');
+      command = `cd "${folderPath}" && ${gitCmd} commit -m "${escapedMessage}"`;
+    }
+
+    console.log(`Running git commit: ${command}`);
+    const { stdout, stderr } = await execAsync(command, { timeout: 10000 });
+
+    console.log(`Git commit output: ${stdout}`);
+    if (stderr && stderr.trim()) {
+      console.log(`Git commit stderr: ${stderr}`);
+    }
+
+    return { success: true, output: stdout.trim() };
+  } catch (error) {
+    // Note: git commit returns exit code 1 when there's nothing to commit
+    // This is not necessarily an error we want to report to the user
+    if (error.message.includes('nothing to commit')) {
+      console.log('Git: Nothing to commit (working tree clean)');
+      return { success: true, output: 'Nothing to commit' };
+    }
+    console.error('Error committing git changes:', error);
+    return { success: false, error: error.message };
+  }
+});

@@ -65,5 +65,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     listModels: (ollamaPath) => ipcRenderer.invoke('ollama:list-models', ollamaPath),
     selectFile: () => ipcRenderer.invoke('ollama:select-file'),
     chat: (ollamaPath, modelName, userPrompt, tasksContext) => ipcRenderer.invoke('ollama:chat', ollamaPath, modelName, userPrompt, tasksContext)
+  },
+
+  // Git
+  git: {
+    detect: () => ipcRenderer.invoke('git:detect'),
+    selectFile: () => ipcRenderer.invoke('git:select-file'),
+    init: (gitPath, folderPath) => ipcRenderer.invoke('git:init', gitPath, folderPath),
+    add: (gitPath, folderPath, files) => ipcRenderer.invoke('git:add', gitPath, folderPath, files),
+    commit: (gitPath, folderPath, message) => ipcRenderer.invoke('git:commit', gitPath, folderPath, message)
   }
 });

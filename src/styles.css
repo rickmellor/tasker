@@ -357,6 +357,27 @@ body[data-theme="dark"] .sidebar-logo-dark {
   min-width: 0; /* Allow shrinking */
 }
 
+/* Git branch icons in sidebar */
+.folder-git-icon {
+  width: 16px;
+  height: 16px;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.folder-git-icon-dark {
+  display: none;
+}
+
+body[data-theme="dark"] .folder-git-icon-light {
+  display: none;
+}
+
+body[data-theme="dark"] .folder-git-icon-dark {
+  display: block;
+}
+
 /* ========================================
    Sidebar AI Agent
    ======================================== */
@@ -381,15 +402,30 @@ body[data-theme="dark"] .sidebar-logo-dark {
   color: var(--text-primary);
   font-size: 0.9rem;
   min-width: 0; /* Allow flex items to shrink below content size */
+  overflow: hidden; /* Ensure nothing escapes the header */
 }
 
 .agent-header .material-icons {
   font-size: 1.1rem;
   color: var(--accent-primary);
+  flex-shrink: 0; /* Icon should never shrink */
+}
+
+.agent-header-text {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0; /* Allow this container to shrink */
+  flex: 1; /* Take remaining space */
+  overflow: hidden; /* Prevent overflow */
+}
+
+.agent-label {
+  flex-shrink: 0; /* Label should never shrink */
+  white-space: nowrap; /* Keep label on one line */
 }
 
 .agent-model-name {
-  margin-left: 0.25rem;
   font-size: 0.7rem;
   font-weight: 400;
   color: var(--text-tertiary);
@@ -399,6 +435,7 @@ body[data-theme="dark"] .sidebar-logo-dark {
   white-space: nowrap;
   min-width: 0; /* Allow shrinking */
   flex-shrink: 1; /* Allow this to shrink first */
+  flex: 1; /* Take remaining space */
 }
 
 .agent-quick-dropdown {
@@ -1496,6 +1533,36 @@ body[data-theme="dark"] .sidebar-logo-dark {
 .folder-item-name input:focus {
   outline: none;
   border-bottom: 1px solid var(--accent-primary);
+}
+
+.folder-git-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.4rem;
+  background: var(--accent-light);
+  border: 1px solid var(--accent-primary);
+  border-radius: 4px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  flex-shrink: 0;
+  margin-right: 0.5rem;
+}
+
+.folder-git-badge-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.folder-git-badge-icon-dark {
+  display: none;
+}
+
+body[data-theme="dark"] .folder-git-badge-icon-light {
+  display: none;
+}
+
+body[data-theme="dark"] .folder-git-badge-icon-dark {
+  display: block;
 }
 
 .folder-item-path {

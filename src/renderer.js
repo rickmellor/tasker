@@ -21,6 +21,8 @@ const state = {
   ollamaPath: null, // Path to ollama executable
   ollamaModel: null, // Selected ollama model
   ollamaAvailable: false, // Whether ollama is detected and working
+  gitPath: null, // Path to git executable
+  gitAvailable: false, // Whether git is detected and working
   agentQuickPrompts: [ // Quick prompts for AI agent
     { id: 1, label: 'High Priority Tasks', prompt: 'Show my 3 highest priority tasks' },
     { id: 2, label: 'Due in 3 Days', prompt: 'Show the work due in the next 3 days' },
@@ -51,6 +53,7 @@ const elements = {
   views: {
     tasks: document.getElementById('tasks-view'),
     profile: document.getElementById('profile-view'),
+    help: document.getElementById('help-view'),
     settings: document.getElementById('settings-view')
   },
 
@@ -82,6 +85,7 @@ const elements = {
   browseFolderBtn: document.getElementById('browse-folder-btn'),
   addFolderCancelBtn: document.getElementById('add-folder-cancel-btn'),
   addFolderSaveBtn: document.getElementById('add-folder-save-btn'),
+  enableVersionControlCheckbox: document.getElementById('enable-version-control'),
 
   // Settings
   themeSelect: document.getElementById('theme-select'),
@@ -105,10 +109,15 @@ const elements = {
   ollamaStatusIcon: document.getElementById('ollama-status-icon'),
   ollamaStatusText: document.getElementById('ollama-status-text'),
 
-  // Help Modal
-  helpModal: document.getElementById('help-modal'),
-  helpBtn: document.getElementById('help-btn'),
-  helpCloseBtn: document.getElementById('help-close-btn'),
+  // Git
+  gitPathInput: document.getElementById('git-path-input'),
+  browseGitBtn: document.getElementById('browse-git-btn'),
+  detectGitBtn: document.getElementById('detect-git-btn'),
+  gitStatus: document.getElementById('git-status'),
+  gitStatusIcon: document.getElementById('git-status-icon'),
+  gitStatusText: document.getElementById('git-status-text'),
+
+  // Help
   helpGlobalHotkey: document.getElementById('help-global-hotkey'),
 
   // Modal
@@ -220,6 +229,11 @@ async function navigateToView(viewName) {
     // Detect Ollama if not already detected or loaded
     if (!state.ollamaPath) {
       detectOllama();
+    }
+  } else if (viewName === 'help') {
+    // Update global hotkey display in help view
+    if (elements.helpGlobalHotkey && state.globalHotkey) {
+      elements.helpGlobalHotkey.textContent = acceleratorToDisplay(state.globalHotkey);
     }
   }
 }
@@ -347,6 +361,8 @@ async function saveAllSettings() {
       ollamaPath: state.ollamaPath,
       ollamaModel: state.ollamaModel,
       ollamaAvailable: state.ollamaAvailable,
+      gitPath: state.gitPath,
+      gitAvailable: state.gitAvailable,
       agentQuickPrompts: state.agentQuickPrompts
     });
   } finally {
@@ -362,6 +378,17 @@ function getCurrentFolder() {
 function openAddFolderModal() {
   elements.folderPathInput.value = '';
   elements.folderNameInput.value = '';
+
+  // Enable/disable version control checkbox based on git availability
+  if (state.gitPath && state.gitAvailable) {
+    elements.enableVersionControlCheckbox.disabled = false;
+    elements.enableVersionControlCheckbox.parentElement.title = '';
+  } else {
+    elements.enableVersionControlCheckbox.disabled = true;
+    elements.enableVersionControlCheckbox.checked = false;
+    elements.enableVersionControlCheckbox.parentElement.title = 'Git must be configured in Settings to enable version control';
+  }
+
   elements.addFolderModal.classList.add('active');
   elements.folderPathInput.focus();
 }
@@ -370,6 +397,7 @@ function closeAddFolderModal() {
   elements.addFolderModal.classList.remove('active');
   elements.folderPathInput.value = '';
   elements.folderNameInput.value = '';
+  elements.enableVersionControlCheckbox.checked = false;
 }
 
 async function browseFolderForModal() {
@@ -410,11 +438,24 @@ async function saveAddFolder() {
         folderName = pathParts[pathParts.length - 1] || 'Tasks';
       }
 
+      // Check if version control should be enabled
+      const enableVersionControl = elements.enableVersionControlCheckbox.checked;
+
+      // Initialize git if requested
+      if (enableVersionControl && state.gitPath) {
+        const gitResult = await window.electronAPI.git.init(state.gitPath, result.path);
+        if (!gitResult.success) {
+          console.error('Failed to initialize git:', gitResult.error);
+          alert('Warning: Could not initialize Git repository: ' + gitResult.error);
+        }
+      }
+
       // Create new folder entry
       const newFolder = {
         id: Date.now().toString(),
         name: folderName,
-        path: result.path
+        path: result.path,
+        versionControl: enableVersionControl && state.gitPath ? true : false
       };
 
       state.taskFolders.push(newFolder);
@@ -518,6 +559,10 @@ function renderSidebarFolders() {
               draggable="true">
         <span class="material-icons nav-icon">folder</span>
         <span class="nav-label">${escapeHtml(folder.name)}</span>
+        ${folder.versionControl ? `
+          <img src="../assets/git-branch-outline.svg" alt="Git" class="folder-git-icon folder-git-icon-light" title="Version control enabled" />
+          <img src="../assets/git-branch-outline-white.svg" alt="Git" class="folder-git-icon folder-git-icon-dark" title="Version control enabled" />
+        ` : ''}
       </button>
     `;
   }).join('');
@@ -549,6 +594,12 @@ function renderFolderList() {
     <div class="folder-item">
       <div class="folder-item-info">
         <div class="folder-item-name">
+          ${folder.versionControl ? `
+            <span class="folder-git-badge" title="Version control enabled">
+              <img src="../assets/git-branch-outline.svg" alt="Git" class="folder-git-badge-icon folder-git-badge-icon-light" />
+              <img src="../assets/git-branch-outline-white.svg" alt="Git" class="folder-git-badge-icon folder-git-badge-icon-dark" />
+            </span>
+          ` : ''}
           <input type="text" value="${escapeHtml(folder.name)}"
                  data-folder-id="${folder.id}"
                  class="folder-name-input" />
@@ -800,6 +851,43 @@ async function initializeTaskStorage() {
 }
 
 // ========================================
+// Git Integration Helper
+// ========================================
+async function commitTaskChange(message) {
+  try {
+    // Only commit if git is configured and current folder has version control enabled
+    const currentFolder = getCurrentFolder();
+    if (!currentFolder || !currentFolder.versionControl) {
+      return; // Skip git operations if not enabled
+    }
+
+    if (!state.gitPath || !state.gitAvailable) {
+      console.log('Git not configured, skipping commit');
+      return;
+    }
+
+    // Stage all changes
+    const addResult = await window.electronAPI.git.add(state.gitPath, currentFolder.path, '.');
+    if (!addResult.success) {
+      console.error('Git add failed:', addResult.error);
+      return; // Don't block task operations if git fails
+    }
+
+    // Commit the changes
+    const commitResult = await window.electronAPI.git.commit(state.gitPath, currentFolder.path, message);
+    if (!commitResult.success) {
+      console.error('Git commit failed:', commitResult.error);
+      return; // Don't block task operations if git fails
+    }
+
+    console.log('Git commit successful:', message);
+  } catch (error) {
+    console.error('Error committing to git:', error);
+    // Don't block task operations if git fails
+  }
+}
+
+// ========================================
 // Task Management
 // ========================================
 async function loadTasks() {
@@ -841,6 +929,10 @@ async function addTask() {
 
     if (result.success) {
       await loadTasks(); // Reload all tasks
+
+      // Commit to git if version control is enabled
+      await commitTaskChange(`Create task: ${taskText}`);
+
       elements.taskInput.value = '';
       elements.taskInput.focus();
     } else {
@@ -888,18 +980,28 @@ async function pasteFromClipboard() {
 
 async function deleteTask(taskPath, isDeleted, forcePermDelete = false) {
   try {
+    // Get task info for commit message before deletion
+    const task = findTaskByPath(state.tasks, taskPath);
+    const taskTitle = task ? task.title : 'Unknown task';
+
     let result;
+    let commitMessage;
 
     if (isDeleted || forcePermDelete) {
       // Permanently delete if already in deleted folder OR if Ctrl is pressed
       result = await window.electronAPI.tasks.permanentlyDelete(taskPath);
+      commitMessage = `Permanently delete task: ${taskTitle}`;
     } else {
       // Move to deleted folder
       result = await window.electronAPI.tasks.delete(taskPath);
+      commitMessage = `Delete task: ${taskTitle}`;
     }
 
     if (result.success) {
       await loadTasks();
+
+      // Commit to git if version control is enabled
+      await commitTaskChange(commitMessage);
     } else {
       console.error('Failed to delete task:', result.error);
     }
@@ -910,10 +1012,17 @@ async function deleteTask(taskPath, isDeleted, forcePermDelete = false) {
 
 async function restoreTask(taskPath) {
   try {
+    // Get task info for commit message before restoration
+    const task = findTaskByPath(state.tasks, taskPath);
+    const taskTitle = task ? task.title : 'Unknown task';
+
     const result = await window.electronAPI.tasks.restore(taskPath);
 
     if (result.success) {
       await loadTasks();
+
+      // Commit to git if version control is enabled
+      await commitTaskChange(`Restore task: ${taskTitle}`);
     } else {
       console.error('Failed to restore task:', result.error);
       alert('Failed to restore task: ' + result.error);
@@ -926,12 +1035,20 @@ async function restoreTask(taskPath) {
 
 async function toggleTask(taskPath, currentCompleted) {
   try {
+    // Get task info for commit message
+    const task = findTaskByPath(state.tasks, taskPath);
+    const taskTitle = task ? task.title : 'Unknown task';
+
     const result = await window.electronAPI.tasks.update(taskPath, {
       completed: !currentCompleted
     });
 
     if (result.success) {
       await loadTasks();
+
+      // Commit to git if version control is enabled
+      const action = !currentCompleted ? 'Complete' : 'Uncomplete';
+      await commitTaskChange(`${action} task: ${taskTitle}`);
     } else {
       console.error('Failed to toggle task:', result.error);
     }
@@ -1035,6 +1152,9 @@ function enableInlineEdit(textElement) {
       try {
         await window.electronAPI.tasks.update(taskPath, { title: newText });
         await loadTasks();
+
+        // Commit to git if version control is enabled
+        await commitTaskChange(`Update task: ${newText}`);
       } catch (error) {
         console.error('Error updating task:', error);
         textElement.textContent = originalText;
@@ -1142,6 +1262,9 @@ async function saveTaskModal() {
     if (result.success) {
       closeTaskModal();
       await loadTasks();
+
+      // Commit to git if version control is enabled
+      await commitTaskChange(`Update task: ${updates.title}`);
     } else {
       console.error('Failed to update task:', result.error);
       alert('Failed to save task: ' + result.error);
@@ -1290,12 +1413,22 @@ function matchesFilters(task) {
         if (task.dueDate && !task.deleted) {
           const dueDate = new Date(task.dueDate);
           const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          dueDate.setHours(0, 0, 0, 0);
+
           const threeDaysFromNow = new Date(today);
           threeDaysFromNow.setDate(today.getDate() + 3);
 
-          if (dueDate >= today && dueDate <= threeDaysFromNow) {
+          // Include both past-due AND due within 3 days
+          if (dueDate < today || (dueDate >= today && dueDate <= threeDaysFromNow)) {
             matches = true;
           }
+        }
+        break;
+
+      case 'with-due-date':
+        if (task.dueDate && task.dueDate.trim() && !task.deleted) {
+          matches = true;
         }
         break;
     }
@@ -1889,21 +2022,6 @@ function setupHotkeyRecorder() {
 }
 
 // ========================================
-// Help Modal
-// ========================================
-function openHelpModal() {
-  // Update global hotkey display in help modal
-  if (elements.helpGlobalHotkey && state.globalHotkey) {
-    elements.helpGlobalHotkey.textContent = acceleratorToDisplay(state.globalHotkey);
-  }
-  elements.helpModal.classList.add('active');
-}
-
-function closeHelpModal() {
-  elements.helpModal.classList.remove('active');
-}
-
-// ========================================
 // Keyboard Shortcuts
 // ========================================
 function updateDeleteButtonStates() {
@@ -2211,6 +2329,113 @@ async function loadOllamaSettings() {
 
     // Update agent model display
     updateAgentModelDisplay();
+  }
+}
+
+// ========================================
+// Git Integration
+// ========================================
+function updateGitStatus(icon, text, type = 'info') {
+  if (elements.gitStatusIcon) {
+    elements.gitStatusIcon.textContent = icon;
+  }
+  if (elements.gitStatusText) {
+    elements.gitStatusText.textContent = text;
+  }
+  if (elements.gitStatus) {
+    // Update color based on type
+    if (type === 'success') {
+      elements.gitStatus.style.color = 'var(--success)';
+    } else if (type === 'error') {
+      elements.gitStatus.style.color = 'var(--danger)';
+    } else {
+      elements.gitStatus.style.color = 'var(--text-secondary)';
+    }
+  }
+}
+
+async function detectGit() {
+  try {
+    updateGitStatus('⏳', 'Detecting Git...', 'info');
+
+    const result = await window.electronAPI.git.detect();
+
+    if (result.success) {
+      state.gitPath = result.path;
+      state.gitAvailable = true;
+
+      if (elements.gitPathInput) {
+        elements.gitPathInput.value = result.path;
+      }
+
+      updateGitStatus('✓', `Git found: ${result.version}`, 'success');
+    } else {
+      state.gitPath = null;
+      state.gitAvailable = false;
+
+      if (elements.gitPathInput) {
+        elements.gitPathInput.value = '';
+        elements.gitPathInput.placeholder = 'Not found - click Browse or Detect';
+      }
+
+      updateGitStatus('✗', result.error || 'Git not found', 'error');
+    }
+
+    await saveAllSettings();
+  } catch (error) {
+    console.error('Error detecting Git:', error);
+    updateGitStatus('✗', 'Error detecting Git', 'error');
+  }
+}
+
+async function browseForGit() {
+  try {
+    const filePath = await window.electronAPI.git.selectFile();
+
+    if (filePath) {
+      // Verify this is actually git by trying to run it
+      updateGitStatus('⏳', 'Verifying executable...', 'info');
+
+      state.gitPath = filePath;
+
+      if (elements.gitPathInput) {
+        elements.gitPathInput.value = filePath;
+      }
+
+      // Try to get version to verify it works
+      const result = await window.electronAPI.git.detect();
+
+      if (result.success) {
+        state.gitAvailable = true;
+        updateGitStatus('✓', `Git found: ${result.version}`, 'success');
+      } else {
+        state.gitAvailable = false;
+        updateGitStatus('✗', 'Invalid Git executable', 'error');
+      }
+
+      await saveAllSettings();
+    }
+  } catch (error) {
+    console.error('Error browsing for Git:', error);
+    updateGitStatus('✗', 'Error selecting file', 'error');
+  }
+}
+
+async function loadGitSettings() {
+  const result = await window.electronAPI.config.read();
+  if (result.success && result.config) {
+    state.gitPath = result.config.gitPath || null;
+    state.gitAvailable = result.config.gitAvailable || false;
+
+    // Update UI
+    if (state.gitPath && elements.gitPathInput) {
+      elements.gitPathInput.value = state.gitPath;
+
+      // Show status if available
+      if (state.gitAvailable) {
+        updateGitStatus('✓', 'Git is configured', 'success');
+      }
+    }
   }
 }
 
@@ -2755,6 +2980,10 @@ function setupEventListeners() {
   elements.ollamaModelSelect.addEventListener('change', handleOllamaModelChange);
   elements.refreshModelsBtn.addEventListener('click', refreshOllamaModels);
 
+  // Git
+  elements.detectGitBtn.addEventListener('click', detectGit);
+  elements.browseGitBtn.addEventListener('click', browseForGit);
+
   // Modal
   elements.modalCancelBtn.addEventListener('click', closeTaskModal);
   elements.modalSaveBtn.addEventListener('click', saveTaskModal);
@@ -2787,20 +3016,7 @@ function setupEventListeners() {
         closeTaskModal();
       } else if (elements.addFolderModal.classList.contains('active')) {
         closeAddFolderModal();
-      } else if (elements.helpModal.classList.contains('active')) {
-        closeHelpModal();
       }
-    }
-  });
-
-  // Help button
-  elements.helpBtn.addEventListener('click', openHelpModal);
-  elements.helpCloseBtn.addEventListener('click', closeHelpModal);
-
-  // Close help modal when clicking outside
-  elements.helpModal.addEventListener('click', (e) => {
-    if (e.target === elements.helpModal) {
-      closeHelpModal();
     }
   });
 
@@ -2854,6 +3070,20 @@ function findTaskById(tasks, id) {
     }
     if (task.children && task.children.length > 0) {
       const found = findTaskById(task.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// Helper function to find a task by file path
+function findTaskByPath(tasks, filePath) {
+  for (const task of tasks) {
+    if (task.filePath === filePath) {
+      return task;
+    }
+    if (task.children && task.children.length > 0) {
+      const found = findTaskByPath(task.children, filePath);
       if (found) return found;
     }
   }
@@ -2914,6 +3144,9 @@ async function init() {
 
     // Load Ollama settings
     await loadOllamaSettings();
+
+    // Load Git settings
+    await loadGitSettings();
 
     // Initialize the application
     await initializeApp();

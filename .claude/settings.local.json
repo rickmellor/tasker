@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init:*)",
+      "Bash(npm run build:win-dir:*)",
+      "Bash(CSC_IDENTITY_AUTO_DISCOVERY=false npm run build:win-dir:*)",
+      "Bash(pkill:*)",
+      "Bash(npm start)",
+      "Read(//mnt/c/Users/**)",
+      "Bash(python3:*)",
+      "Bash(npm run dev:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nInitial commit: Tasker task management application\n\nFeatures:\n- Electron-based desktop application for Windows/MacOS\n- File-based task storage (Markdown files)\n- Hierarchical task organization with drag-and-drop\n- Multi-folder support for organizing different projects\n- Task filtering (priority, completion, due dates)\n- Task sorting (priority, due date, creation date)\n- Metrics dashboard showing task statistics\n- Ollama AI integration for task assistance\n- Customizable quick prompts for AI agent\n- Light/dark theme support with auto-detection\n- System tray integration\n- Global hotkey for quick task addition (Ctrl+Alt+T)\n- Auto-launch on Windows startup\n- Resizable sidebar\n- Expand/collapse task hierarchies\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git config:*)",
+      "Read(//mnt/c/Temp/**)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd task management enhancements and UI improvements\n\n- Fix sidebar overflow: Add CSS min-width constraints and text-overflow handling to prevent content from extending beyond sidebar when resized narrow\n- Implement Ctrl+click permanent delete: Hold Ctrl while clicking delete to permanently remove tasks and all children without confirmation\n- Add radioactive yellow delete button: Show delete_forever icon with yellow (#FFD700) background and glow effect when Ctrl is pressed, providing clear visual warning for permanent deletion\n- Add date indicators: Display calendar icon on tasks with due dates, showing both due date and created date on hover\n- Highlight past-due tasks: Red calendar icon for tasks past their due date (excluding completed tasks)\n- Update help modal: Document Ctrl+click permanent delete keyboard shortcut\n- Migrate agent UI: Convert quick prompts from dropdown to menu interface with better UX\n- Add model name display: Show selected Ollama model in agent header\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git --version:*)",
+      "Bash(\"/mnt/c/Users/RMellor/AppData/Local/Programs/Git/bin/git.exe\" --version)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
