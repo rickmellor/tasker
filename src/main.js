@@ -915,7 +915,13 @@ ipcMain.handle('git:init', async (_event, gitPath, folderPath) => {
 
 ipcMain.handle('git:add', async (_event, gitPath, folderPath, files = ['.']) => {
   try {
-    // First, check what git sees as untracked/modified
+    // Wait for file operations to complete by checking git status
+    // Poll until git sees changes or timeout after 2 seconds
+    let statusOutput = '';
+    const maxWaitTime = 2000; // 2 seconds max
+    const pollInterval = 50; // Check every 50ms
+    let elapsed = 0;
+
     let statusCommand;
     if (process.platform === 'win32' && gitPath.includes(':\\')) {
       if (gitPath.includes(' ')) {
@@ -928,9 +934,31 @@ ipcMain.handle('git:add', async (_event, gitPath, folderPath, files = ['.']) => 
       statusCommand = `cd "${folderPath}" && ${gitCmd} status --short`;
     }
 
-    console.log(`Running git status before add: ${statusCommand}`);
-    const statusResult = await execAsync(statusCommand, { timeout: 5000 });
-    console.log(`Git status before add:\n${statusResult.stdout}`);
+    // Poll until git sees changes
+    while (elapsed < maxWaitTime) {
+      try {
+        const statusResult = await execAsync(statusCommand, { timeout: 5000 });
+        statusOutput = statusResult.stdout.trim();
+
+        if (statusOutput.length > 0) {
+          // Git sees changes, we can proceed
+          console.log(`Git detected changes after ${elapsed}ms:\n${statusOutput}`);
+          break;
+        }
+      } catch (error) {
+        console.error('Error checking git status:', error);
+        break;
+      }
+
+      // Wait before checking again
+      await new Promise(resolve => setTimeout(resolve, pollInterval));
+      elapsed += pollInterval;
+    }
+
+    if (elapsed >= maxWaitTime && statusOutput.length === 0) {
+      console.log('Warning: Git did not detect any changes after waiting 2 seconds');
+      return { success: true, output: 'No changes detected' };
+    }
 
     // files parameter can be an array of file paths or a single path
     // Default to '.' to add all changes
