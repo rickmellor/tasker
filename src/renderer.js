@@ -2111,7 +2111,7 @@ function selectTask(taskPath, options = {}) {
   updateSelectedTaskHighlight();
 }
 
-function navigateTasksVertical(direction) {
+function navigateTasksVertical(direction, shiftKey = false) {
   const taskElements = getVisibleTaskElements();
 
   if (taskElements.length === 0) return;
@@ -2129,11 +2129,23 @@ function navigateTasksVertical(direction) {
   }
 
   if (taskElements[newIndex]) {
-    selectTask(taskElements[newIndex].dataset.taskPath);
+    const newTaskPath = taskElements[newIndex].dataset.taskPath;
+
+    if (shiftKey && state.lastSelectedTaskPath) {
+      // Extend selection: add the new task to selection
+      if (!state.selectedTaskPaths.includes(newTaskPath)) {
+        state.selectedTaskPaths.push(newTaskPath);
+      }
+      state.lastSelectedTaskPath = newTaskPath;
+      updateSelectedTaskHighlight();
+    } else {
+      // Normal navigation: clear and select single task
+      selectTask(newTaskPath);
+    }
   }
 }
 
-function navigateTasksHorizontal(direction) {
+function navigateTasksHorizontal(direction, shiftKey = false) {
   // Only for kanban view
   if (state.taskViewMode !== 'kanban') return;
 
@@ -2174,7 +2186,19 @@ function navigateTasksHorizontal(direction) {
     if (targetCards.length > 0) {
       // Try to maintain same position, or select last card if column is shorter
       const targetCard = targetCards[Math.min(positionInColumn, targetCards.length - 1)];
-      selectTask(targetCard.dataset.taskPath);
+      const newTaskPath = targetCard.dataset.taskPath;
+
+      if (shiftKey && state.lastSelectedTaskPath) {
+        // Extend selection: add the new task to selection
+        if (!state.selectedTaskPaths.includes(newTaskPath)) {
+          state.selectedTaskPaths.push(newTaskPath);
+        }
+        state.lastSelectedTaskPath = newTaskPath;
+        updateSelectedTaskHighlight();
+      } else {
+        // Normal navigation: clear and select single task
+        selectTask(newTaskPath);
+      }
     }
   }
 }
@@ -2962,19 +2986,19 @@ function setupKeyboardShortcuts() {
 
         switch (e.key) {
           case 'ArrowUp':
-            navigateTasksVertical('up');
+            navigateTasksVertical('up', e.shiftKey);
             break;
           case 'ArrowDown':
-            navigateTasksVertical('down');
+            navigateTasksVertical('down', e.shiftKey);
             break;
           case 'ArrowLeft':
             if (state.taskViewMode === 'kanban') {
-              navigateTasksHorizontal('left');
+              navigateTasksHorizontal('left', e.shiftKey);
             }
             break;
           case 'ArrowRight':
             if (state.taskViewMode === 'kanban') {
-              navigateTasksHorizontal('right');
+              navigateTasksHorizontal('right', e.shiftKey);
             }
             break;
         }
