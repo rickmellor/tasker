@@ -1587,11 +1587,12 @@ body[data-theme="dark"] .status-completed {
 
 .folder-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border-light);
   transition: background 0.15s;
+  gap: 1rem;
 }
 
 .folder-item:last-child {
@@ -1605,12 +1606,14 @@ body[data-theme="dark"] .status-completed {
 .folder-item-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
 }
 
 .folder-item-name {
   font-weight: 500;
   color: var(--text-primary);
-  margin-bottom: 0.25rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -1671,10 +1674,60 @@ body[data-theme="dark"] .folder-git-badge-icon-dark {
   white-space: nowrap;
 }
 
+.folder-item-path-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.folder-path-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
+  padding: 0.25rem 0;
+  min-width: 0;
+}
+
+.folder-path-input:focus {
+  outline: none;
+  border-bottom: 1px solid var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.folder-path-browse-btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.folder-path-browse-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent-primary);
+}
+
+.folder-path-browse-btn .material-icons {
+  font-size: 18px;
+  color: var(--text-secondary);
+}
+
+.folder-path-browse-btn:hover .material-icons {
+  color: var(--accent-primary);
+}
+
 .folder-item-actions {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  padding-top: 0.25rem;
 }
 
 .folder-item-btn {
@@ -2092,6 +2145,49 @@ body[data-theme="dark"] .folder-git-badge-icon-dark {
 .textarea-lg:focus {
   outline: none;
   border-color: var(--accent-primary);
+}
+
+/* Modal Details Display (for viewing with clickable links) */
+.modal-details-container {
+  position: relative;
+}
+
+.modal-details-display {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  min-height: 12rem;
+  cursor: text;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.modal-details-display:hover {
+  border-color: var(--accent-primary);
+}
+
+.modal-details-display .placeholder-text {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* Clickable links in task details and kanban cards */
+.task-link {
+  color: var(--accent-primary);
+  text-decoration: underline;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.task-link:hover {
+  color: var(--accent-hover);
+  text-decoration: none;
 }
 
 input[disabled],

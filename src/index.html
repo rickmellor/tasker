@@ -381,6 +381,22 @@
                 </div>
 
                 <div class="shortcuts-section">
+                  <h4>View Navigation</h4>
+                  <div class="shortcut-item">
+                    <kbd>F1</kbd>
+                    <span class="shortcut-description">Open Help view</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>F2</kbd>
+                    <span class="shortcut-description">Open Dashboard (Profile) view</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>F5</kbd>
+                    <span class="shortcut-description">Open Settings view</span>
+                  </div>
+                </div>
+
+                <div class="shortcuts-section">
                   <h4>General</h4>
                   <div class="shortcut-item">
                     <kbd>Escape</kbd>
@@ -568,6 +584,29 @@
                   </p>
                   <p class="setting-description" style="margin-bottom: 0.5rem;">
                     <strong>Full Edit:</strong> Click anywhere else on a task item to open the full editor where you can set priority, due date, add detailed notes, and mark as complete.
+                  </p>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>Clickable Links</h4>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Automatic Link Detection:</strong> URLs in task details are automatically detected and displayed as clickable links. This works for http://, https://, www., and ftp:// URLs.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Opening Links:</strong> Simply click any blue underlined link to open it in your default browser. Links work in both the task detail modal and kanban card descriptions.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Editing Mode:</strong> When viewing task details, click anywhere on the text (except on a link) to switch to editing mode where you can modify the raw text. Click away or blur the field to return to viewing mode with clickable links.
+                  </p>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>Single Instance</h4>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>One Window Only:</strong> Tasker allows only one instance to run at a time. If you try to launch the application while it's already running, the existing window will be brought into focus instead of opening a second window.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Restoring Window:</strong> If the window is minimized or hidden when you launch Tasker again, it will be automatically restored and brought to the front. This prevents accidentally opening multiple instances.
                   </p>
                 </div>
 
@@ -853,7 +892,10 @@
 
           <div class="form-group">
             <label for="modal-details">Details</label>
-            <textarea id="modal-details" class="textarea-lg" rows="8" placeholder="Task details and notes..."></textarea>
+            <div class="modal-details-container">
+              <div id="modal-details-display" class="modal-details-display" style="display: none;"></div>
+              <textarea id="modal-details" class="textarea-lg" rows="8" placeholder="Task details and notes..."></textarea>
+            </div>
           </div>
 
           <div class="form-row">

@@ -139,6 +139,7 @@ const elements = {
   taskModal: document.getElementById('task-modal'),
   modalTitle: document.getElementById('modal-title'),
   modalDetails: document.getElementById('modal-details'),
+  modalDetailsDisplay: document.getElementById('modal-details-display'),
   modalPriority: document.getElementById('modal-priority'),
   modalDueDate: document.getElementById('modal-due-date'),
   modalStatus: document.getElementById('modal-status'),
@@ -572,6 +573,37 @@ async function renameFolder(folderId, newName) {
   }
 }
 
+async function updateFolderPath(folderId, newPath) {
+  const folder = state.taskFolders.find(f => f.id === folderId);
+  if (!folder) return;
+
+  // Validate that the path exists by trying to initialize it
+  const initResult = await window.electronAPI.tasks.initialize(newPath);
+  if (!initResult.success) {
+    alert(`Invalid folder path: ${initResult.error}`);
+    renderFolderList(); // Reset the input to the old value
+    return;
+  }
+
+  // Update the folder path
+  folder.path = newPath;
+  saveFoldersToStorage();
+  renderSidebarFolders();
+  renderFolderList();
+
+  // If this is the currently active folder, reload tasks from the new path
+  if (folder.id === state.currentFolderId) {
+    await loadTasks();
+  }
+}
+
+async function browseFolderPath(folderId) {
+  const selectedPath = await window.electronAPI.tasks.selectFolder();
+  if (selectedPath) {
+    await updateFolderPath(folderId, selectedPath);
+  }
+}
+
 async function switchFolder(folderId) {
   // Save current folder's expanded tasks before switching
   await saveAllSettings();
@@ -670,7 +702,16 @@ function renderFolderList() {
                  data-folder-id="${folder.id}"
                  class="folder-name-input" />
         </div>
-        <div class="folder-item-path" title="${escapeHtml(folder.path)}">${escapeHtml(folder.path)}</div>
+        <div class="folder-item-path-container">
+          <input type="text" value="${escapeHtml(folder.path)}"
+                 data-folder-id="${folder.id}"
+                 class="folder-path-input"
+                 title="Click to edit path, or use Browse button"
+                 placeholder="Folder path" />
+          <button class="folder-path-browse-btn" data-folder-id="${folder.id}" title="Browse for folder">
+            <span class="material-icons">folder_open</span>
+          </button>
+        </div>
       </div>
       <div class="folder-item-actions">
         <button class="folder-item-btn" data-folder-id="${folder.id}" data-action="remove" title="Remove folder (Ctrl+click to permanently delete from disk)">
@@ -689,6 +730,25 @@ function renderFolderList() {
       if (newName) {
         renameFolder(folderId, newName);
       }
+    });
+  });
+
+  // Add event listeners for path inputs
+  elements.folderList.querySelectorAll('.folder-path-input').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const folderId = e.target.dataset.folderId;
+      const newPath = e.target.value.trim();
+      if (newPath) {
+        updateFolderPath(folderId, newPath);
+      }
+    });
+  });
+
+  // Add event listeners for browse buttons
+  elements.folderList.querySelectorAll('.folder-path-browse-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const folderId = e.currentTarget.dataset.folderId;
+      await browseFolderPath(folderId);
     });
   });
 
@@ -1639,6 +1699,90 @@ function enableInlineEdit(textElement) {
 // ========================================
 // Task Modal
 // ========================================
+// Helper function to extract URLs from text
+function extractUrls(text) {
+  if (!text) return [];
+  // Regex to match URLs (http, https, ftp, and bare domains)
+  const urlRegex = /https?:\/\/[^\s<]+|www\.[^\s<]+|ftp:\/\/[^\s<]+/gi;
+  const matches = text.match(urlRegex);
+  return matches ? [...new Set(matches)] : []; // Remove duplicates
+}
+
+// Helper function to linkify text (convert URLs to clickable links)
+// This properly escapes text while preserving URLs as clickable links
+function linkifyText(text) {
+  if (!text) return '';
+
+  const urlRegex = /(https?:\/\/[^\s<]+|www\.[^\s<]+|ftp:\/\/[^\s<]+)/gi;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+
+  // Reset regex lastIndex
+  urlRegex.lastIndex = 0;
+
+  while ((match = urlRegex.exec(text)) !== null) {
+    // Add escaped text before the URL
+    if (match.index > lastIndex) {
+      parts.push(escapeHtml(text.substring(lastIndex, match.index)));
+    }
+
+    // Add the URL as a link
+    const url = match[0];
+    const href = url.startsWith('www.') ? `http://${url}` : url;
+    parts.push(`<a href="#" class="task-link" data-url="${escapeHtml(href)}" title="Click to open">${escapeHtml(url)}</a>`);
+
+    lastIndex = match.index + url.length;
+  }
+
+  // Add any remaining text after the last URL
+  if (lastIndex < text.length) {
+    parts.push(escapeHtml(text.substring(lastIndex)));
+  }
+
+  return parts.join('');
+}
+
+// Show the details in display mode with clickable links
+function showDetailsDisplayMode() {
+  if (!elements.modalDetails || !elements.modalDetailsDisplay) return;
+
+  const text = elements.modalDetails.value;
+
+  // Linkify URLs (this also escapes text) and convert newlines to <br>
+  const htmlText = linkifyText(text).replace(/\n/g, '<br>');
+
+  elements.modalDetailsDisplay.innerHTML = htmlText || '<span class="placeholder-text">No details</span>';
+  elements.modalDetailsDisplay.style.display = 'block';
+  elements.modalDetails.style.display = 'none';
+
+  // Add click handlers to all links
+  elements.modalDetailsDisplay.querySelectorAll('.task-link').forEach(link => {
+    link.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation(); // Prevent switching to edit mode
+
+      const url = e.currentTarget.dataset.url;
+      if (url) {
+        try {
+          await window.electronAPI.openExternal(url);
+        } catch (error) {
+          console.error('Error opening link:', error);
+        }
+      }
+    });
+  });
+}
+
+// Show the details in edit mode (textarea)
+function showDetailsEditMode() {
+  if (!elements.modalDetails || !elements.modalDetailsDisplay) return;
+
+  elements.modalDetailsDisplay.style.display = 'none';
+  elements.modalDetails.style.display = 'block';
+  elements.modalDetails.focus();
+}
+
 function openTaskModal(task) {
   state.editingTask = task;
 
@@ -1647,6 +1791,9 @@ function openTaskModal(task) {
   elements.modalDetails.value = task.body || '';
   elements.modalPriority.value = task.priority || 'normal';
   elements.modalDueDate.value = task.dueDate || '';
+
+  // Show details in display mode with clickable links
+  showDetailsDisplayMode();
 
   // Populate status dropdown and select current status
   if (elements.modalStatus) {
@@ -1760,15 +1907,24 @@ function toggleFilterDropdown() {
   elements.filterToggleBtn.classList.toggle('active', isActive);
 }
 
-function openFilterMenu() {
-  // Open the filter menu
-  elements.filterMenu.classList.add('active');
-  elements.filterToggleBtn.classList.add('active');
+function toggleFilterMenu() {
+  const isActive = elements.filterMenu.classList.contains('active');
 
-  // Focus on first checkbox
-  const firstCheckbox = elements.filterMenu.querySelector('input[type="checkbox"]');
-  if (firstCheckbox) {
-    firstCheckbox.focus();
+  if (isActive) {
+    // Close the menu
+    closeFilterMenu();
+  } else {
+    // Open the menu
+    elements.filterMenu.classList.add('active');
+    elements.filterToggleBtn.classList.add('active');
+
+    // Focus on first checkbox after a small delay to ensure menu is visible
+    setTimeout(() => {
+      const firstCheckbox = elements.filterMenu.querySelector('input[type="checkbox"]');
+      if (firstCheckbox) {
+        firstCheckbox.focus();
+      }
+    }, 10);
   }
 }
 
@@ -1860,15 +2016,24 @@ function toggleSortDropdown() {
   elements.sortToggleBtn.classList.toggle('active', isActive);
 }
 
-function openSortMenu() {
-  // Open the sort menu
-  elements.sortMenu.classList.add('active');
-  elements.sortToggleBtn.classList.add('active');
+function toggleSortMenu() {
+  const isActive = elements.sortMenu.classList.contains('active');
 
-  // Focus on first radio button
-  const firstRadio = elements.sortMenu.querySelector('input[type="radio"]');
-  if (firstRadio) {
-    firstRadio.focus();
+  if (isActive) {
+    // Close the menu
+    closeSortMenu();
+  } else {
+    // Open the menu
+    elements.sortMenu.classList.add('active');
+    elements.sortToggleBtn.classList.add('active');
+
+    // Focus on first radio button after a small delay to ensure menu is visible
+    setTimeout(() => {
+      const firstRadio = elements.sortMenu.querySelector('input[type="radio"]');
+      if (firstRadio) {
+        firstRadio.focus();
+      }
+    }, 10);
   }
 }
 
@@ -2412,7 +2577,7 @@ function renderKanbanCard(task) {
         <span class="kanban-card-title">${escapeHtml(task.title)}</span>
       </div>
       ${dateInfo}
-      ${task.body ? `<div class="kanban-card-description">${escapeHtml(task.body.substring(0, 100))}${task.body.length > 100 ? '...' : ''}</div>` : ''}
+      ${task.body ? `<div class="kanban-card-description">${linkifyText(task.body.substring(0, 100))}${task.body.length > 100 ? '...' : ''}</div>` : ''}
     </div>
   `;
 }
@@ -2995,6 +3160,23 @@ function setupKeyboardShortcuts() {
       }
     }
 
+    // Handle F-key navigation (works anywhere)
+    if (e.key === 'F1') {
+      e.preventDefault();
+      navigateToView('help');
+      return;
+    }
+    if (e.key === 'F2') {
+      e.preventDefault();
+      navigateToView('profile');
+      return;
+    }
+    if (e.key === 'F5') {
+      e.preventDefault();
+      navigateToView('settings');
+      return;
+    }
+
     // Handle Ctrl+K for Kanban view and Ctrl+L for List view (works in tasks view)
     if (state.currentView === 'tasks' && (e.ctrlKey || e.metaKey)) {
       if (e.key === 'k' || e.key === 'K') {
@@ -3009,12 +3191,12 @@ function setupKeyboardShortcuts() {
       }
       if (e.key === 'f' || e.key === 'F') {
         e.preventDefault();
-        openFilterMenu();
+        toggleFilterMenu();
         return;
       }
       if (e.key === 's' || e.key === 'S') {
         e.preventDefault();
-        openSortMenu();
+        toggleSortMenu();
         return;
       }
     }
@@ -3023,8 +3205,14 @@ function setupKeyboardShortcuts() {
     const isArrowKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key);
 
     if (isArrowKey) {
-      // Only handle arrow keys in tasks view and when modal is not open
-      if (state.currentView === 'tasks' && !elements.taskModal.classList.contains('active')) {
+      // Only handle arrow keys in tasks view and when modal/menus are not open
+      const isFilterMenuOpen = elements.filterMenu.classList.contains('active');
+      const isSortMenuOpen = elements.sortMenu.classList.contains('active');
+
+      if (state.currentView === 'tasks' &&
+          !elements.taskModal.classList.contains('active') &&
+          !isFilterMenuOpen &&
+          !isSortMenuOpen) {
         e.preventDefault();
         e.stopPropagation();
 
@@ -4222,6 +4410,23 @@ function setupEventListeners() {
     }
   });
 
+  // Switch to edit mode when clicking on display area
+  if (elements.modalDetailsDisplay) {
+    elements.modalDetailsDisplay.addEventListener('click', (e) => {
+      // Don't switch to edit mode if clicking on a link
+      if (!e.target.classList.contains('task-link')) {
+        showDetailsEditMode();
+      }
+    });
+  }
+
+  // Switch back to display mode when textarea loses focus
+  if (elements.modalDetails) {
+    elements.modalDetails.addEventListener('blur', () => {
+      showDetailsDisplayMode();
+    });
+  }
+
   // Parent task link click handler
   elements.modalParent.addEventListener('click', () => {
     const parentId = elements.modalParent.dataset.parentId;
@@ -4391,6 +4596,23 @@ function setupKanbanDragAndDrop() {
     card.addEventListener('dragstart', handleKanbanDragStart);
     card.addEventListener('dragend', handleKanbanDragEnd);
     card.addEventListener('click', handleKanbanCardClick);
+
+    // Add click handlers for links in card descriptions
+    card.querySelectorAll('.task-link').forEach(link => {
+      link.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation(); // Prevent card click
+
+        const url = e.currentTarget.dataset.url;
+        if (url) {
+          try {
+            await window.electronAPI.openExternal(url);
+          } catch (error) {
+            console.error('Error opening link:', error);
+          }
+        }
+      });
+    });
   });
 
   kanbanColumns.forEach(column => {

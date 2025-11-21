@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeTheme, dialog, Menu, globalShortcut, Tray, clipboard } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeTheme, dialog, Menu, globalShortcut, Tray, clipboard, shell } = require('electron');
 const path = require('path');
 const { exec } = require('child_process');
 const { promisify } = require('util');
@@ -298,6 +298,43 @@ function registerGlobalHotkey(accelerator) {
   }
 }
 
+// ========================================
+// Singleton Instance Lock
+// ========================================
+// Only allow one instance of the app to run at a time
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  // Another instance is already running, quit immediately
+  console.log('Another instance is already running. Quitting...');
+  app.quit();
+} else {
+  // We got the lock, so set up handler for when someone tries to launch a second instance
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    // Someone tried to run a second instance, focus our window instead
+    console.log('Second instance launch detected, focusing existing window');
+
+    if (mainWindow) {
+      // Restore window if minimized
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+
+      // Show window if hidden
+      if (!mainWindow.isVisible()) {
+        mainWindow.show();
+      }
+
+      // Focus the window
+      mainWindow.focus();
+
+      // Bring to front (Windows specific)
+      mainWindow.setAlwaysOnTop(true);
+      mainWindow.setAlwaysOnTop(false);
+    }
+  });
+}
+
 // App lifecycle
 app.whenReady().then(async () => {
   createWindow();
@@ -352,6 +389,17 @@ ipcMain.handle('clipboard:read-text', () => {
 ipcMain.handle('clipboard:write-text', (_event, text) => {
   clipboard.writeText(text);
   return { success: true };
+});
+
+// Shell IPC handlers
+ipcMain.handle('shell:open-external', async (_event, url) => {
+  try {
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (error) {
+    console.error('Error opening external URL:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 ipcMain.handle('get-platform', () => {
@@ -1087,18 +1135,18 @@ ipcMain.handle('git:log', async (_event, gitPath, folderPath) => {
   try {
     // Build git log command with explicit work-tree and git-dir
     // Format: hash|author|date|message
-    // Use --reflog --all to show all commits including those reset away from
+    // Use --all to show commits from all branches (without --reflog to avoid duplicates)
     let command;
     const format = '--pretty=format:%H|%an|%aI|%s';
 
     if (process.platform === 'win32' && gitPath.includes(':\\')) {
       // On Windows, use PowerShell with proper escaping
       // Use single quotes around the format string to prevent PowerShell variable expansion
-      const psCommand = `& '${gitPath}' --git-dir='${folderPath}/.git' --work-tree='${folderPath}' log --reflog --all '--pretty=format:%H|%an|%aI|%s'`;
+      const psCommand = `& '${gitPath}' --git-dir='${folderPath}/.git' --work-tree='${folderPath}' log --all '--pretty=format:%H|%an|%aI|%s'`;
       command = `powershell.exe -NoProfile -Command "${psCommand}"`;
     } else {
       const gitCmd = gitPath.includes(' ') ? `"${gitPath}"` : gitPath;
-      command = `${gitCmd} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" log --reflog --all ${format}`;
+      command = `${gitCmd} --git-dir="${folderPath}/.git" --work-tree="${folderPath}" log --all ${format}`;
     }
 
     const { stdout, stderr } = await execAsync(command, { timeout: 10000 });
@@ -1107,13 +1155,18 @@ ipcMain.handle('git:log', async (_event, gitPath, folderPath) => {
       console.log(`Git log stderr: ${stderr}`);
     }
 
-    // Parse log output
+    // Parse log output and deduplicate by hash
     const commits = [];
+    const seenHashes = new Set();
     if (stdout && stdout.trim()) {
       const lines = stdout.trim().split('\n');
       for (const line of lines) {
         const [hash, author, date, message] = line.split('|');
-        commits.push({ hash, author, date, message });
+        // Only add if we haven't seen this commit hash before
+        if (!seenHashes.has(hash)) {
+          seenHashes.add(hash);
+          commits.push({ hash, author, date, message });
+        }
       }
     }
 

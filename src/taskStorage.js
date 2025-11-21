@@ -112,6 +112,7 @@ class TaskStorage {
     let priority = 'normal';
     let dueDate = null;
     let created = null;
+    let status = 'Pending';
     let body = '';
     let inFrontmatter = false;
 
@@ -139,16 +140,34 @@ class TaskStorage {
           dueDate = line.substring(8).trim() || null;
         } else if (line.startsWith('created:')) {
           created = line.substring(8).trim();
+        } else if (line.startsWith('status:')) {
+          status = line.substring(7).trim();
         }
       } else {
         body += line + '\n';
       }
     }
 
+    // Trim body and remove the title heading if present
+    body = body.trim();
+
     // If no title in frontmatter, use first line of body
-    if (!title && body.trim()) {
-      const firstLine = body.trim().split('\n')[0];
+    if (!title && body) {
+      const firstLine = body.split('\n')[0];
       title = firstLine.replace(/^#\s*/, '').trim();
+    }
+
+    // Remove the title heading from body if it matches (case-insensitive)
+    if (title && body) {
+      const bodyLines = body.split('\n');
+      if (bodyLines[0].trim() === `# ${title}`) {
+        // Remove first line (title heading) and any following empty lines
+        bodyLines.shift();
+        while (bodyLines.length > 0 && bodyLines[0].trim() === '') {
+          bodyLines.shift();
+        }
+        body = bodyLines.join('\n').trim();
+      }
     }
 
     // Check if this task has children (is a directory)
@@ -164,6 +183,11 @@ class TaskStorage {
     // Check if this task is in the .deleted folder
     const isDeleted = filePath.includes(path.sep + '.deleted' + path.sep);
 
+    // If status is not set, derive from completed flag
+    if (!status) {
+      status = completed ? 'Completed' : 'Pending';
+    }
+
     return {
       id,
       title: title || 'Untitled Task',
@@ -171,6 +195,7 @@ class TaskStorage {
       body: body.trim(),
       priority: priority || 'normal',
       dueDate: dueDate || null,
+      status: status || 'Pending',
       created: created || new Date().toISOString(),
       fileName,
       filePath,
@@ -183,7 +208,7 @@ class TaskStorage {
   /**
    * Create task markdown content
    */
-  createTaskContent(title, completed = false, body = '', priority = 'normal', dueDate = null, created = null) {
+  createTaskContent(title, completed = false, body = '', priority = 'normal', dueDate = null, status = 'Pending', created = null) {
     const createdDate = created || new Date().toISOString();
     const dueDateLine = dueDate ? `dueDate: ${dueDate}` : 'dueDate: ';
 
@@ -192,6 +217,7 @@ completed: ${completed}
 title: ${title}
 priority: ${priority}
 ${dueDateLine}
+status: ${status}
 created: ${createdDate}
 ---
 
@@ -209,8 +235,8 @@ ${body}
     const fileName = this.generateFileName(text, id);
     const taskPath = path.join(parentPath, fileName);
 
-    // Create the markdown file
-    const content = this.createTaskContent(text, false, body);
+    // Create the markdown file with status: 'Pending'
+    const content = this.createTaskContent(text, false, body, 'normal', null, 'Pending');
     await fs.writeFile(taskPath, content, 'utf-8');
 
     // Update parent metadata to include this task in order
@@ -225,6 +251,7 @@ ${body}
       title: text,
       completed: false,
       body,
+      status: 'Pending',
       fileName,
       filePath: taskPath,
       hasChildren: false,
@@ -239,15 +266,25 @@ ${body}
     const task = await this.parseTaskFile(taskPath);
 
     const title = updates.title !== undefined ? updates.title : task.title;
-    const completed = updates.completed !== undefined ? updates.completed : task.completed;
+    let completed = updates.completed !== undefined ? updates.completed : task.completed;
     const body = updates.body !== undefined ? updates.body : task.body;
     const priority = updates.priority !== undefined ? updates.priority : task.priority;
     const dueDate = updates.dueDate !== undefined ? updates.dueDate : task.dueDate;
+    let status = updates.status !== undefined ? updates.status : task.status;
 
-    const content = this.createTaskContent(title, completed, body, priority, dueDate, task.created);
+    // Sync status and completed flag - prioritize status field over completed checkbox
+    if (updates.status !== undefined) {
+      // If status is being updated, sync completed flag
+      completed = updates.status === 'Completed';
+    } else if (updates.completed !== undefined) {
+      // If completed flag is being updated (and status wasn't), sync status
+      status = updates.completed ? 'Completed' : 'Pending';
+    }
+
+    const content = this.createTaskContent(title, completed, body, priority, dueDate, status, task.created);
     await fs.writeFile(taskPath, content, 'utf-8');
 
-    return { ...task, title, completed, body, priority, dueDate };
+    return { ...task, title, completed, body, priority, dueDate, status };
   }
 
   /**

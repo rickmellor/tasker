@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getPlatform: () => ipcRenderer.invoke('get-platform'),
 
+  // Shell
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+
   // Theme
   getSystemTheme: () => ipcRenderer.invoke('get-system-theme'),
   onThemeChanged: (callback) => {
