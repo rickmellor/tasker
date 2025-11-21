@@ -1760,6 +1760,23 @@ function toggleFilterDropdown() {
   elements.filterToggleBtn.classList.toggle('active', isActive);
 }
 
+function openFilterMenu() {
+  // Open the filter menu
+  elements.filterMenu.classList.add('active');
+  elements.filterToggleBtn.classList.add('active');
+
+  // Focus on first checkbox
+  const firstCheckbox = elements.filterMenu.querySelector('input[type="checkbox"]');
+  if (firstCheckbox) {
+    firstCheckbox.focus();
+  }
+}
+
+function closeFilterMenu() {
+  elements.filterMenu.classList.remove('active');
+  elements.filterToggleBtn.classList.remove('active');
+}
+
 function handleFilterChange(e) {
   if (!e.target.matches('input[type="checkbox"]')) return;
 
@@ -1841,6 +1858,23 @@ function updateDeletedCount() {
 function toggleSortDropdown() {
   const isActive = elements.sortMenu.classList.toggle('active');
   elements.sortToggleBtn.classList.toggle('active', isActive);
+}
+
+function openSortMenu() {
+  // Open the sort menu
+  elements.sortMenu.classList.add('active');
+  elements.sortToggleBtn.classList.add('active');
+
+  // Focus on first radio button
+  const firstRadio = elements.sortMenu.querySelector('input[type="radio"]');
+  if (firstRadio) {
+    firstRadio.focus();
+  }
+}
+
+function closeSortMenu() {
+  elements.sortMenu.classList.remove('active');
+  elements.sortToggleBtn.classList.remove('active');
 }
 
 function handleSortChange(e) {
@@ -2973,6 +3007,16 @@ function setupKeyboardShortcuts() {
         toggleViewMode('list');
         return;
       }
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        openFilterMenu();
+        return;
+      }
+      if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        openSortMenu();
+        return;
+      }
     }
 
     // Arrow key navigation - handle these specially
@@ -4033,6 +4077,72 @@ function setupEventListeners() {
   // Sort
   elements.sortToggleBtn.addEventListener('click', toggleSortDropdown);
   elements.sortMenu.addEventListener('change', handleSortChange);
+
+  // Filter menu keyboard navigation
+  elements.filterMenu.addEventListener('keydown', (e) => {
+    if (!elements.filterMenu.classList.contains('active')) return;
+
+    const checkboxes = Array.from(elements.filterMenu.querySelectorAll('input[type="checkbox"]'));
+    const currentIndex = checkboxes.indexOf(document.activeElement);
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      let nextIndex;
+      if (e.key === 'ArrowDown') {
+        nextIndex = currentIndex < checkboxes.length - 1 ? currentIndex + 1 : 0;
+      } else {
+        nextIndex = currentIndex > 0 ? currentIndex - 1 : checkboxes.length - 1;
+      }
+      if (checkboxes[nextIndex]) {
+        checkboxes[nextIndex].focus();
+      }
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      if (currentIndex >= 0 && checkboxes[currentIndex]) {
+        checkboxes[currentIndex].checked = !checkboxes[currentIndex].checked;
+        checkboxes[currentIndex].dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      closeFilterMenu();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeFilterMenu();
+    }
+  });
+
+  // Sort menu keyboard navigation
+  elements.sortMenu.addEventListener('keydown', (e) => {
+    if (!elements.sortMenu.classList.contains('active')) return;
+
+    const radios = Array.from(elements.sortMenu.querySelectorAll('input[type="radio"]'));
+    const currentIndex = radios.indexOf(document.activeElement);
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      let nextIndex;
+      if (e.key === 'ArrowDown') {
+        nextIndex = currentIndex < radios.length - 1 ? currentIndex + 1 : 0;
+      } else {
+        nextIndex = currentIndex > 0 ? currentIndex - 1 : radios.length - 1;
+      }
+      if (radios[nextIndex]) {
+        radios[nextIndex].focus();
+      }
+    } else if (e.key === ' ') {
+      e.preventDefault();
+      if (currentIndex >= 0 && radios[currentIndex]) {
+        radios[currentIndex].checked = true;
+        radios[currentIndex].dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      closeSortMenu();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeSortMenu();
+    }
+  });
 
   // Close filter and sort dropdowns when clicking outside
   document.addEventListener('click', (e) => {
