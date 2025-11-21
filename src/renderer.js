@@ -33,7 +33,8 @@ const state = {
   taskStatuses: ['Pending', 'In Work', 'Blocked', 'Completed'], // Customizable task statuses
   ctrlKeyPressed: false, // Track Ctrl/Cmd key state for delete button styling
   taskViewMode: 'list', // Track task view mode: 'list' or 'kanban'
-  selectedTaskPath: null // Track currently selected task for keyboard navigation
+  selectedTaskPaths: [], // Track selected tasks for multi-select and keyboard navigation
+  lastSelectedTaskPath: null // Track last selected task for shift-click range selection
 };
 
 // ========================================
@@ -576,7 +577,8 @@ async function switchFolder(folderId) {
   await saveAllSettings();
 
   state.currentFolderId = folderId;
-  state.selectedTaskPath = null; // Clear selection when switching folders
+  state.selectedTaskPaths = []; // Clear selection when switching folders
+  state.lastSelectedTaskPath = null;
 
   // Load the new folder's expanded tasks
   const result = await window.electronAPI.config.read();
@@ -1389,8 +1391,8 @@ async function deleteTask(taskPath, isDeleted, forcePermDelete = false) {
     const task = findTaskByPath(state.tasks, taskPath);
     const taskTitle = task ? task.title : 'Unknown task';
 
-    // Remember if this was the selected task
-    const wasSelected = (state.selectedTaskPath === taskPath);
+    // Remember if this was a selected task
+    const wasSelected = state.selectedTaskPaths.includes(taskPath);
 
     let result;
     let commitMessage;
@@ -1408,13 +1410,22 @@ async function deleteTask(taskPath, isDeleted, forcePermDelete = false) {
     if (result.success) {
       await loadTasks();
 
-      // If deleted task was selected, select another task
+      // If deleted task was selected, remove it from selection
       if (wasSelected) {
-        const taskElements = getVisibleTaskElements();
-        if (taskElements.length > 0) {
-          selectTask(taskElements[0].dataset.taskPath);
-        } else {
-          state.selectedTaskPath = null;
+        const index = state.selectedTaskPaths.indexOf(taskPath);
+        if (index > -1) {
+          state.selectedTaskPaths.splice(index, 1);
+        }
+        if (state.lastSelectedTaskPath === taskPath) {
+          state.lastSelectedTaskPath = state.selectedTaskPaths[state.selectedTaskPaths.length - 1] || null;
+        }
+
+        // If no tasks are selected, select the first available task
+        if (state.selectedTaskPaths.length === 0) {
+          const taskElements = getVisibleTaskElements();
+          if (taskElements.length > 0) {
+            selectTask(taskElements[0].dataset.taskPath);
+          }
         }
       }
 
@@ -1987,7 +1998,7 @@ function renderTasks() {
   updateSelectedTaskHighlight();
 
   // Auto-select first task if nothing is selected (only in tasks view)
-  if (state.currentView === 'tasks' && !state.selectedTaskPath) {
+  if (state.currentView === 'tasks' && state.selectedTaskPaths.length === 0) {
     const taskElements = getVisibleTaskElements();
     if (taskElements.length > 0) {
       selectTask(taskElements[0].dataset.taskPath);
@@ -2004,20 +2015,33 @@ function updateSelectedTaskHighlight() {
     el.classList.remove('selected');
   });
 
-  // Add selection to current task
-  if (state.selectedTaskPath) {
-    // Escape backslashes for CSS selector (Windows paths need \\ in selectors)
-    const escapedPath = state.selectedTaskPath.replace(/\\/g, '\\\\');
+  // Add selection to all selected tasks
+  if (state.selectedTaskPaths.length > 0) {
+    state.selectedTaskPaths.forEach(taskPath => {
+      // Escape backslashes for CSS selector (Windows paths need \\ in selectors)
+      const escapedPath = taskPath.replace(/\\/g, '\\\\');
 
-    const selector = state.taskViewMode === 'kanban'
-      ? `.kanban-card[data-task-path="${escapedPath}"]`
-      : `.task-item[data-task-path="${escapedPath}"]`;
+      const selector = state.taskViewMode === 'kanban'
+        ? `.kanban-card[data-task-path="${escapedPath}"]`
+        : `.task-item[data-task-path="${escapedPath}"]`;
 
-    const element = document.querySelector(selector);
+      const element = document.querySelector(selector);
 
-    if (element) {
-      element.classList.add('selected');
-      element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      if (element) {
+        element.classList.add('selected');
+      }
+    });
+
+    // Scroll to the last selected task
+    if (state.lastSelectedTaskPath) {
+      const escapedPath = state.lastSelectedTaskPath.replace(/\\/g, '\\\\');
+      const selector = state.taskViewMode === 'kanban'
+        ? `.kanban-card[data-task-path="${escapedPath}"]`
+        : `.task-item[data-task-path="${escapedPath}"]`;
+      const element = document.querySelector(selector);
+      if (element) {
+        element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
     }
   }
 }
@@ -2030,8 +2054,60 @@ function getVisibleTaskElements() {
   }
 }
 
-function selectTask(taskPath) {
-  state.selectedTaskPath = taskPath;
+function selectTask(taskPath, options = {}) {
+  const { ctrlKey = false, shiftKey = false, clearSelection = false } = options;
+
+  if (clearSelection) {
+    // Clear all selections
+    state.selectedTaskPaths = [];
+    state.lastSelectedTaskPath = null;
+    updateSelectedTaskHighlight();
+    return;
+  }
+
+  if (ctrlKey) {
+    // Ctrl-Click: Toggle selection
+    const index = state.selectedTaskPaths.indexOf(taskPath);
+    if (index > -1) {
+      // Deselect
+      state.selectedTaskPaths.splice(index, 1);
+      if (state.lastSelectedTaskPath === taskPath) {
+        state.lastSelectedTaskPath = state.selectedTaskPaths[state.selectedTaskPaths.length - 1] || null;
+      }
+    } else {
+      // Select
+      state.selectedTaskPaths.push(taskPath);
+      state.lastSelectedTaskPath = taskPath;
+    }
+  } else if (shiftKey && state.lastSelectedTaskPath) {
+    // Shift-Click: Select range from last selected to current
+    const taskElements = getVisibleTaskElements();
+    const startIndex = taskElements.findIndex(el => el.dataset.taskPath === state.lastSelectedTaskPath);
+    const endIndex = taskElements.findIndex(el => el.dataset.taskPath === taskPath);
+
+    if (startIndex !== -1 && endIndex !== -1) {
+      // Clear current selection
+      state.selectedTaskPaths = [];
+
+      // Select range
+      const min = Math.min(startIndex, endIndex);
+      const max = Math.max(startIndex, endIndex);
+
+      for (let i = min; i <= max; i++) {
+        const path = taskElements[i].dataset.taskPath;
+        if (!state.selectedTaskPaths.includes(path)) {
+          state.selectedTaskPaths.push(path);
+        }
+      }
+
+      state.lastSelectedTaskPath = taskPath;
+    }
+  } else {
+    // Normal click: Select only this task
+    state.selectedTaskPaths = [taskPath];
+    state.lastSelectedTaskPath = taskPath;
+  }
+
   updateSelectedTaskHighlight();
 }
 
@@ -2041,8 +2117,8 @@ function navigateTasksVertical(direction) {
   if (taskElements.length === 0) return;
 
   let currentIndex = -1;
-  if (state.selectedTaskPath) {
-    currentIndex = taskElements.findIndex(el => el.dataset.taskPath === state.selectedTaskPath);
+  if (state.lastSelectedTaskPath) {
+    currentIndex = taskElements.findIndex(el => el.dataset.taskPath === state.lastSelectedTaskPath);
   }
 
   let newIndex;
@@ -2065,8 +2141,8 @@ function navigateTasksHorizontal(direction) {
   if (taskElements.length === 0) return;
 
   let currentIndex = -1;
-  if (state.selectedTaskPath) {
-    currentIndex = taskElements.findIndex(el => el.dataset.taskPath === state.selectedTaskPath);
+  if (state.lastSelectedTaskPath) {
+    currentIndex = taskElements.findIndex(el => el.dataset.taskPath === state.lastSelectedTaskPath);
   }
 
   if (currentIndex === -1) {
@@ -2104,33 +2180,47 @@ function navigateTasksHorizontal(direction) {
 }
 
 function handleTaskKeyboardAction(action) {
-  if (!state.selectedTaskPath) return;
-
-  const taskPath = state.selectedTaskPath;
-  const task = findTaskByPath(state.tasks, taskPath);
-  if (!task) return;
+  if (state.selectedTaskPaths.length === 0) return;
 
   switch (action) {
     case 'toggle':
-      // Spacebar: expand/collapse if has children
-      if (task.children && task.children.length > 0) {
-        toggleExpanded(task.id);
+      // Spacebar: expand/collapse last selected task if has children
+      if (state.lastSelectedTaskPath) {
+        const task = findTaskByPath(state.tasks, state.lastSelectedTaskPath);
+        if (task && task.children && task.children.length > 0) {
+          toggleExpanded(task.id);
+        }
       }
       break;
 
     case 'open':
-      // Enter: open detail dialog
-      openTaskModal(task);
+      // Enter: open detail dialog for last selected task
+      if (state.lastSelectedTaskPath) {
+        const task = findTaskByPath(state.tasks, state.lastSelectedTaskPath);
+        if (task) {
+          openTaskModal(task);
+        }
+      }
       break;
 
     case 'delete':
-      // Del: soft delete
-      deleteTask(taskPath, task.deleted, false);
+      // Del: soft delete all selected tasks
+      for (const taskPath of [...state.selectedTaskPaths]) {
+        const task = findTaskByPath(state.tasks, taskPath);
+        if (task) {
+          deleteTask(taskPath, task.deleted, false);
+        }
+      }
       break;
 
     case 'nuclear-delete':
-      // Ctrl+Del: nuclear delete
-      deleteTask(taskPath, task.deleted, true);
+      // Ctrl+Del: nuclear delete all selected tasks
+      for (const taskPath of [...state.selectedTaskPaths]) {
+        const task = findTaskByPath(state.tasks, taskPath);
+        if (task) {
+          deleteTask(taskPath, task.deleted, true);
+        }
+      }
       break;
   }
 }
@@ -3877,13 +3967,23 @@ function setupEventListeners() {
       return;
     }
 
-    // Handle task item click (anywhere else) - open modal
+    // Handle task item click (anywhere else)
     const taskItem = e.target.closest('.task-item');
     if (taskItem && !e.target.classList.contains('task-checkbox')) {
-      const taskId = parseInt(taskItem.dataset.taskId);
-      const task = findTaskById(state.tasks, taskId);
-      if (task) {
-        openTaskModal(task);
+      const taskPath = taskItem.dataset.taskPath;
+
+      // Multi-select with Ctrl/Shift or single select
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        // Multi-select mode
+        selectTask(taskPath, { ctrlKey: e.ctrlKey || e.metaKey, shiftKey: e.shiftKey });
+      } else {
+        // Single select - open modal
+        selectTask(taskPath);
+        const taskId = parseInt(taskItem.dataset.taskId);
+        const task = findTaskById(state.tasks, taskId);
+        if (task) {
+          openTaskModal(task);
+        }
       }
       return;
     }
@@ -4252,11 +4352,20 @@ function handleKanbanCardClick(e) {
   if (state.draggedTask) return;
 
   const card = e.currentTarget;
-  const taskId = parseInt(card.dataset.taskId);
-  const task = findTaskById(state.tasks, taskId);
+  const taskPath = card.dataset.taskPath;
 
-  if (task) {
-    openTaskModal(task);
+  // Multi-select with Ctrl/Shift or single select
+  if (e.ctrlKey || e.metaKey || e.shiftKey) {
+    // Multi-select mode
+    selectTask(taskPath, { ctrlKey: e.ctrlKey || e.metaKey, shiftKey: e.shiftKey });
+  } else {
+    // Single select - open modal
+    selectTask(taskPath);
+    const taskId = parseInt(card.dataset.taskId);
+    const task = findTaskById(state.tasks, taskId);
+    if (task) {
+      openTaskModal(task);
+    }
   }
 }
 
