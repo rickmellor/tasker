@@ -30,7 +30,10 @@ const state = {
     { id: 2, label: 'Due in 3 Days', prompt: 'Show the work due in the next 3 days' },
     { id: 3, label: 'What to Work On', prompt: 'What should I work on now?' }
   ],
-  ctrlKeyPressed: false // Track Ctrl/Cmd key state for delete button styling
+  taskStatuses: ['Pending', 'In Work', 'Blocked', 'Completed'], // Customizable task statuses
+  ctrlKeyPressed: false, // Track Ctrl/Cmd key state for delete button styling
+  taskViewMode: 'list', // Track task view mode: 'list' or 'kanban'
+  selectedTaskPath: null // Track currently selected task for keyboard navigation
 };
 
 // ========================================
@@ -65,6 +68,11 @@ const elements = {
   pasteBtn: document.getElementById('pasteBtn'),
   taskContainer: document.getElementById('taskContainer'),
 
+  // View Toggle
+  viewListBtn: document.getElementById('view-list-btn'),
+  viewKanbanBtn: document.getElementById('view-kanban-btn'),
+  kanbanBoard: document.getElementById('kanbanBoard'),
+
   // Profile
   profileUsername: document.getElementById('profile-username'),
   statTotal: document.getElementById('stat-total'),
@@ -79,6 +87,10 @@ const elements = {
   // Prompt management
   addPromptBtn: document.getElementById('add-prompt-btn'),
   promptsList: document.getElementById('prompts-list'),
+
+  // Status management
+  addStatusBtn: document.getElementById('add-status-btn'),
+  statusesList: document.getElementById('statuses-list'),
 
   // Add Folder Modal
   addFolderModal: document.getElementById('add-folder-modal'),
@@ -127,9 +139,11 @@ const elements = {
   modalTitle: document.getElementById('modal-title'),
   modalDetails: document.getElementById('modal-details'),
   modalPriority: document.getElementById('modal-priority'),
-  modalCompleted: document.getElementById('modal-completed'),
   modalDueDate: document.getElementById('modal-due-date'),
+  modalStatus: document.getElementById('modal-status'),
   modalCreated: document.getElementById('modal-created'),
+  modalParent: document.getElementById('modal-parent'),
+  modalParentContainer: document.getElementById('modal-parent-container'),
   modalCancelBtn: document.getElementById('modal-cancel-btn'),
   modalSaveBtn: document.getElementById('modal-save-btn'),
   modalUndeleteBtn: document.getElementById('modal-undelete-btn'),
@@ -242,6 +256,7 @@ async function navigateToView(viewName) {
     await updateProfileStats();
   } else if (viewName === 'settings') {
     renderFolderList();
+    renderStatusesList();
 
     // Detect Ollama if not already detected or loaded
     if (!state.ollamaPath) {
@@ -326,6 +341,9 @@ async function loadFoldersFromStorage() {
     // Load timeline zoom (default to 1.0)
     state.timelineZoom = result.config.timelineZoom || 1.0;
 
+    // Load task view mode (default to 'list')
+    state.taskViewMode = result.config.taskViewMode || 'list';
+
     // Load expanded tasks for current folder
     const expandedTasksData = result.config.expandedTasks || {};
     if (state.currentFolderId && expandedTasksData[state.currentFolderId]) {
@@ -384,7 +402,9 @@ async function saveAllSettings() {
       gitPath: state.gitPath,
       gitAvailable: state.gitAvailable,
       agentQuickPrompts: state.agentQuickPrompts,
-      timelineZoom: state.timelineZoom
+      taskStatuses: state.taskStatuses,
+      timelineZoom: state.timelineZoom,
+      taskViewMode: state.taskViewMode
     });
   } finally {
     hideSavingIndicator();
@@ -556,6 +576,7 @@ async function switchFolder(folderId) {
   await saveAllSettings();
 
   state.currentFolderId = folderId;
+  state.selectedTaskPath = null; // Clear selection when switching folders
 
   // Load the new folder's expanded tasks
   const result = await window.electronAPI.config.read();
@@ -860,6 +881,17 @@ function restoreUIState() {
   if (elements.startMinimizedCheckbox) {
     elements.startMinimizedCheckbox.checked = state.startMinimized;
   }
+
+  // Restore view mode button states
+  if (elements.viewListBtn && elements.viewKanbanBtn) {
+    if (state.taskViewMode === 'list') {
+      elements.viewListBtn.classList.add('active');
+      elements.viewKanbanBtn.classList.remove('active');
+    } else {
+      elements.viewListBtn.classList.remove('active');
+      elements.viewKanbanBtn.classList.add('active');
+    }
+  }
 }
 
 // ========================================
@@ -898,47 +930,82 @@ async function initializeTaskStorage() {
 // ========================================
 // Git Integration Helper
 // ========================================
-async function commitTaskChange(message) {
-  try {
-    // Only commit if git is configured and current folder has version control enabled
-    const currentFolder = getCurrentFolder();
-    if (!currentFolder || !currentFolder.versionControl) {
-      return; // Skip git operations if not enabled
-    }
+let gitCommitQueue = [];
+let gitCommitInProgress = false;
 
-    if (!state.gitPath || !state.gitAvailable) {
-      console.log('Git not configured, skipping commit');
-      return;
-    }
-
-    // Stage all changes (the git:add handler will poll until files are written)
-    const addResult = await window.electronAPI.git.add(state.gitPath, currentFolder.path, '.');
-    if (!addResult.success) {
-      console.error('Git add failed:', addResult.error);
-      return; // Don't block task operations if git fails
-    }
-
-    // Commit the changes
-    const commitResult = await window.electronAPI.git.commit(state.gitPath, currentFolder.path, message);
-    if (!commitResult.success) {
-      console.error('Git commit failed:', commitResult.error);
-      return; // Don't block task operations if git fails
-    }
-
-    console.log('Git commit successful:', message);
-
-    // Reload timeline to show the new commit
-    await loadTimeline();
-  } catch (error) {
-    console.error('Error committing to git:', error);
-    // Don't block task operations if git fails
+async function processGitCommitQueue() {
+  // If already processing or queue is empty, do nothing
+  if (gitCommitInProgress || gitCommitQueue.length === 0) {
+    return;
   }
+
+  gitCommitInProgress = true;
+
+  while (gitCommitQueue.length > 0) {
+    const message = gitCommitQueue.shift();
+
+    try {
+      // Only commit if git is configured and current folder has version control enabled
+      const currentFolder = getCurrentFolder();
+      if (!currentFolder || !currentFolder.versionControl) {
+        continue; // Skip this commit
+      }
+
+      if (!state.gitPath || !state.gitAvailable) {
+        console.log('Git not configured, skipping commit');
+        continue; // Skip this commit
+      }
+
+      // Stage all changes (the git:add handler will poll until files are written)
+      const addResult = await window.electronAPI.git.add(state.gitPath, currentFolder.path, '.');
+      if (!addResult.success) {
+        console.error('Git add failed:', addResult.error);
+        continue; // Skip this commit but try next one
+      }
+
+      // Commit the changes
+      const commitResult = await window.electronAPI.git.commit(state.gitPath, currentFolder.path, message);
+      if (!commitResult.success) {
+        console.error('Git commit failed:', commitResult.error);
+        continue; // Skip this commit but try next one
+      }
+
+      console.log('Git commit successful:', message);
+
+      // Reload timeline to show the new commit
+      await loadTimeline();
+    } catch (error) {
+      console.error('Error committing to git:', error);
+      // Continue processing remaining commits
+    }
+  }
+
+  gitCommitInProgress = false;
+}
+
+async function commitTaskChange(message) {
+  // Add commit to queue and start processing
+  gitCommitQueue.push(message);
+  processGitCommitQueue().catch(err => {
+    console.error('Error processing git commit queue:', err);
+    gitCommitInProgress = false; // Reset flag on error
+  });
 }
 
 // ========================================
 // Git Timeline
 // ========================================
+let loadTimelineInProgress = false;
+
 async function loadTimeline() {
+  // Prevent concurrent timeline loads which can cause git stack overflow on Windows
+  if (loadTimelineInProgress) {
+    console.log('Timeline load already in progress, skipping...');
+    return;
+  }
+
+  loadTimelineInProgress = true;
+
   try {
     const currentFolder = getCurrentFolder();
 
@@ -946,12 +1013,14 @@ async function loadTimeline() {
     if (!currentFolder || !currentFolder.versionControl) {
       elements.timelineSection.style.display = 'none';
       state.timelineCommits = [];
+      loadTimelineInProgress = false;
       return;
     }
 
     if (!state.gitPath || !state.gitAvailable) {
       elements.timelineSection.style.display = 'none';
       state.timelineCommits = [];
+      loadTimelineInProgress = false;
       return;
     }
 
@@ -961,6 +1030,7 @@ async function loadTimeline() {
     if (!result.success || !result.commits || result.commits.length === 0) {
       elements.timelineSection.style.display = 'none';
       state.timelineCommits = [];
+      loadTimelineInProgress = false;
       return;
     }
 
@@ -973,6 +1043,8 @@ async function loadTimeline() {
     console.error('Error loading timeline:', error);
     elements.timelineSection.style.display = 'none';
     state.timelineCommits = [];
+  } finally {
+    loadTimelineInProgress = false;
   }
 }
 
@@ -1205,14 +1277,25 @@ async function handleRollback() {
 // ========================================
 // Task Management
 // ========================================
+// Helper function to add parentId to all tasks
+function addParentIds(tasks, parentId = null) {
+  for (const task of tasks) {
+    task.parentId = parentId;
+    if (task.children && task.children.length > 0) {
+      addParentIds(task.children, task.id);
+    }
+  }
+}
+
 async function loadTasks() {
   try {
     const result = await window.electronAPI.tasks.load();
 
     if (result.success) {
       state.tasks = result.tasks;
+      // Add parent IDs to all tasks for easy parent lookup
+      addParentIds(state.tasks);
       renderTasks();
-      updateProfileStats();
       updateDeletedCount();
       await loadTimeline(); // Load git timeline
     } else {
@@ -1244,13 +1327,19 @@ async function addTask() {
     );
 
     if (result.success) {
-      await loadTasks(); // Reload all tasks
-
-      // Commit to git if version control is enabled
-      await commitTaskChange(`Create task: ${taskText}`);
-
+      // Clear input immediately so user can continue adding tasks
       elements.taskInput.value = '';
       elements.taskInput.focus();
+
+      // Reload tasks in background (don't block input)
+      loadTasks().catch(err => {
+        console.error('Error loading tasks:', err);
+      });
+
+      // Commit to git asynchronously (fire-and-forget, don't block UI)
+      commitTaskChange(`Create task: ${taskText}`).catch(err => {
+        console.error('Error committing task change:', err);
+      });
     } else {
       console.error('Failed to create task:', result.error);
     }
@@ -1300,6 +1389,9 @@ async function deleteTask(taskPath, isDeleted, forcePermDelete = false) {
     const task = findTaskByPath(state.tasks, taskPath);
     const taskTitle = task ? task.title : 'Unknown task';
 
+    // Remember if this was the selected task
+    const wasSelected = (state.selectedTaskPath === taskPath);
+
     let result;
     let commitMessage;
 
@@ -1316,8 +1408,20 @@ async function deleteTask(taskPath, isDeleted, forcePermDelete = false) {
     if (result.success) {
       await loadTasks();
 
-      // Commit to git if version control is enabled
-      await commitTaskChange(commitMessage);
+      // If deleted task was selected, select another task
+      if (wasSelected) {
+        const taskElements = getVisibleTaskElements();
+        if (taskElements.length > 0) {
+          selectTask(taskElements[0].dataset.taskPath);
+        } else {
+          state.selectedTaskPath = null;
+        }
+      }
+
+      // Commit to git asynchronously (fire-and-forget, don't block UI)
+      commitTaskChange(commitMessage).catch(err => {
+        console.error('Error committing task change:', err);
+      });
     } else {
       console.error('Failed to delete task:', result.error);
     }
@@ -1362,9 +1466,11 @@ async function toggleTask(taskPath, currentCompleted) {
     if (result.success) {
       await loadTasks();
 
-      // Commit to git if version control is enabled
+      // Commit to git asynchronously (fire-and-forget, don't block UI)
       const action = !currentCompleted ? 'Complete' : 'Uncomplete';
-      await commitTaskChange(`${action} task: ${taskTitle}`);
+      commitTaskChange(`${action} task: ${taskTitle}`).catch(err => {
+        console.error('Error committing task change:', err);
+      });
     } else {
       console.error('Failed to toggle task:', result.error);
     }
@@ -1469,8 +1575,10 @@ function enableInlineEdit(textElement) {
         await window.electronAPI.tasks.update(taskPath, { title: newText });
         await loadTasks();
 
-        // Commit to git if version control is enabled
-        await commitTaskChange(`Update task: ${newText}`);
+        // Commit to git asynchronously (fire-and-forget, don't block UI)
+        commitTaskChange(`Update task: ${newText}`).catch(err => {
+          console.error('Error committing task change:', err);
+        });
       } catch (error) {
         console.error('Error updating task:', error);
         textElement.textContent = originalText;
@@ -1527,12 +1635,33 @@ function openTaskModal(task) {
   elements.modalTitle.value = task.title;
   elements.modalDetails.value = task.body || '';
   elements.modalPriority.value = task.priority || 'normal';
-  elements.modalCompleted.checked = task.completed || false;
   elements.modalDueDate.value = task.dueDate || '';
+
+  // Populate status dropdown and select current status
+  if (elements.modalStatus) {
+    elements.modalStatus.innerHTML = state.taskStatuses.map(status => `
+      <option value="${escapeHtml(status)}">${escapeHtml(status)}</option>
+    `).join('');
+    elements.modalStatus.value = task.status || 'Pending';
+  }
 
   // Format created date for display
   const createdDate = new Date(task.created);
   elements.modalCreated.value = createdDate.toLocaleString();
+
+  // Show/hide parent task field
+  if (task.parentId) {
+    const parentTask = findTaskById(state.tasks, task.parentId);
+    if (parentTask) {
+      elements.modalParent.textContent = parentTask.title;
+      elements.modalParent.dataset.parentId = parentTask.id;
+      elements.modalParentContainer.style.display = 'block';
+    } else {
+      elements.modalParentContainer.style.display = 'none';
+    }
+  } else {
+    elements.modalParentContainer.style.display = 'none';
+  }
 
   // Show/hide undelete button based on deleted status
   if (task.deleted) {
@@ -1543,6 +1672,22 @@ function openTaskModal(task) {
 
   // Show modal
   elements.taskModal.classList.add('active');
+
+  // Setup status sync handlers
+  setupModalStatusSync();
+}
+
+function setupModalStatusSync() {
+  // Remove any existing listeners by cloning the status dropdown
+  const newStatusDropdown = elements.modalStatus.cloneNode(true);
+  elements.modalStatus.parentNode.replaceChild(newStatusDropdown, elements.modalStatus);
+  elements.modalStatus = newStatusDropdown;
+
+  // Populate status dropdown again after cloning
+  elements.modalStatus.innerHTML = state.taskStatuses.map(status => `
+    <option value="${escapeHtml(status)}">${escapeHtml(status)}</option>
+  `).join('');
+  elements.modalStatus.value = state.editingTask.status || 'Pending';
 }
 
 function closeTaskModal() {
@@ -1553,9 +1698,14 @@ function closeTaskModal() {
   elements.modalTitle.value = '';
   elements.modalDetails.value = '';
   elements.modalPriority.value = 'normal';
-  elements.modalCompleted.checked = false;
   elements.modalDueDate.value = '';
   elements.modalCreated.value = '';
+  elements.modalParent.textContent = '';
+  delete elements.modalParent.dataset.parentId;
+  elements.modalParentContainer.style.display = 'none';
+  if (elements.modalStatus) {
+    elements.modalStatus.value = 'Pending';
+  }
 }
 
 async function saveTaskModal() {
@@ -1565,8 +1715,8 @@ async function saveTaskModal() {
     title: elements.modalTitle.value.trim(),
     body: elements.modalDetails.value.trim(),
     priority: elements.modalPriority.value,
-    completed: elements.modalCompleted.checked,
-    dueDate: elements.modalDueDate.value || null
+    dueDate: elements.modalDueDate.value || null,
+    status: elements.modalStatus ? elements.modalStatus.value : 'Pending'
   };
 
   try {
@@ -1827,6 +1977,173 @@ function filterTasks(tasks) {
 // Task Rendering
 // ========================================
 function renderTasks() {
+  if (state.taskViewMode === 'kanban') {
+    renderTasksKanban();
+  } else {
+    renderTasksList();
+  }
+
+  // Restore selected task highlight after re-render
+  updateSelectedTaskHighlight();
+
+  // Auto-select first task if nothing is selected (only in tasks view)
+  if (state.currentView === 'tasks' && !state.selectedTaskPath) {
+    const taskElements = getVisibleTaskElements();
+    if (taskElements.length > 0) {
+      selectTask(taskElements[0].dataset.taskPath);
+    }
+  }
+}
+
+// ========================================
+// Keyboard Navigation
+// ========================================
+function updateSelectedTaskHighlight() {
+  // Remove previous selection
+  document.querySelectorAll('.task-item.selected, .kanban-card.selected').forEach(el => {
+    el.classList.remove('selected');
+  });
+
+  // Add selection to current task
+  if (state.selectedTaskPath) {
+    // Escape backslashes for CSS selector (Windows paths need \\ in selectors)
+    const escapedPath = state.selectedTaskPath.replace(/\\/g, '\\\\');
+
+    const selector = state.taskViewMode === 'kanban'
+      ? `.kanban-card[data-task-path="${escapedPath}"]`
+      : `.task-item[data-task-path="${escapedPath}"]`;
+
+    const element = document.querySelector(selector);
+
+    if (element) {
+      element.classList.add('selected');
+      element.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
+}
+
+function getVisibleTaskElements() {
+  if (state.taskViewMode === 'kanban') {
+    return Array.from(document.querySelectorAll('.kanban-card'));
+  } else {
+    return Array.from(document.querySelectorAll('.task-item'));
+  }
+}
+
+function selectTask(taskPath) {
+  state.selectedTaskPath = taskPath;
+  updateSelectedTaskHighlight();
+}
+
+function navigateTasksVertical(direction) {
+  const taskElements = getVisibleTaskElements();
+
+  if (taskElements.length === 0) return;
+
+  let currentIndex = -1;
+  if (state.selectedTaskPath) {
+    currentIndex = taskElements.findIndex(el => el.dataset.taskPath === state.selectedTaskPath);
+  }
+
+  let newIndex;
+  if (direction === 'down') {
+    newIndex = currentIndex < taskElements.length - 1 ? currentIndex + 1 : 0;
+  } else {
+    newIndex = currentIndex > 0 ? currentIndex - 1 : taskElements.length - 1;
+  }
+
+  if (taskElements[newIndex]) {
+    selectTask(taskElements[newIndex].dataset.taskPath);
+  }
+}
+
+function navigateTasksHorizontal(direction) {
+  // Only for kanban view
+  if (state.taskViewMode !== 'kanban') return;
+
+  const taskElements = getVisibleTaskElements();
+  if (taskElements.length === 0) return;
+
+  let currentIndex = -1;
+  if (state.selectedTaskPath) {
+    currentIndex = taskElements.findIndex(el => el.dataset.taskPath === state.selectedTaskPath);
+  }
+
+  if (currentIndex === -1) {
+    selectTask(taskElements[0].dataset.taskPath);
+    return;
+  }
+
+  const currentElement = taskElements[currentIndex];
+  const currentColumn = currentElement.closest('.kanban-column');
+  if (!currentColumn) return;
+
+  // Get position in current column
+  const cardsInColumn = Array.from(currentColumn.querySelectorAll('.kanban-card'));
+  const positionInColumn = cardsInColumn.indexOf(currentElement);
+
+  // Find adjacent column
+  const allColumns = Array.from(document.querySelectorAll('.kanban-column'));
+  const currentColumnIndex = allColumns.indexOf(currentColumn);
+
+  let targetColumn;
+  if (direction === 'right') {
+    targetColumn = allColumns[currentColumnIndex + 1];
+  } else {
+    targetColumn = allColumns[currentColumnIndex - 1];
+  }
+
+  if (targetColumn) {
+    const targetCards = Array.from(targetColumn.querySelectorAll('.kanban-card'));
+    if (targetCards.length > 0) {
+      // Try to maintain same position, or select last card if column is shorter
+      const targetCard = targetCards[Math.min(positionInColumn, targetCards.length - 1)];
+      selectTask(targetCard.dataset.taskPath);
+    }
+  }
+}
+
+function handleTaskKeyboardAction(action) {
+  if (!state.selectedTaskPath) return;
+
+  const taskPath = state.selectedTaskPath;
+  const task = findTaskByPath(state.tasks, taskPath);
+  if (!task) return;
+
+  switch (action) {
+    case 'toggle':
+      // Spacebar: expand/collapse if has children
+      if (task.children && task.children.length > 0) {
+        toggleExpanded(task.id);
+      }
+      break;
+
+    case 'open':
+      // Enter: open detail dialog
+      openTaskModal(task);
+      break;
+
+    case 'delete':
+      // Del: soft delete
+      deleteTask(taskPath, task.deleted, false);
+      break;
+
+    case 'nuclear-delete':
+      // Ctrl+Del: nuclear delete
+      deleteTask(taskPath, task.deleted, true);
+      break;
+  }
+}
+
+function renderTasksList() {
+  // Show list view, hide kanban view
+  if (elements.taskContainer.parentElement) {
+    elements.taskContainer.parentElement.style.display = 'block';
+  }
+  if (elements.kanbanBoard) {
+    elements.kanbanBoard.style.display = 'none';
+  }
+
   if (state.tasks.length === 0) {
     elements.taskContainer.innerHTML = '<p class="empty-state">No tasks yet. Add one above!</p>';
     updateExpandCollapseButton();
@@ -1845,6 +2162,111 @@ function renderTasks() {
 
   elements.taskContainer.innerHTML = renderTaskList(filteredTasks, 0);
   updateExpandCollapseButton();
+}
+
+function renderTasksKanban() {
+  // Hide list view, show kanban view
+  if (elements.taskContainer.parentElement) {
+    elements.taskContainer.parentElement.style.display = 'none';
+  }
+  if (elements.kanbanBoard) {
+    elements.kanbanBoard.style.display = 'flex';
+  }
+
+  // Hide expand/collapse button in kanban view
+  if (elements.expandCollapseBtn) {
+    elements.expandCollapseBtn.style.display = 'none';
+  }
+
+  if (state.tasks.length === 0) {
+    elements.kanbanBoard.innerHTML = '<p class="empty-state">No tasks yet. Add one above!</p>';
+    return;
+  }
+
+  // Apply sorting then filtering
+  const sortedTasks = sortTasks(state.tasks);
+  const filteredTasks = filterTasks(sortedTasks);
+
+  // Group tasks by status
+  const tasksByStatus = {};
+  state.taskStatuses.forEach(status => {
+    tasksByStatus[status] = [];
+  });
+
+  // Flatten tasks (ignore hierarchy in kanban view) and group by status
+  const flattenTasks = (tasks) => {
+    tasks.forEach(task => {
+      const taskStatus = task.status || 'Pending';
+      if (tasksByStatus[taskStatus]) {
+        tasksByStatus[taskStatus].push(task);
+      }
+      if (task.children && task.children.length > 0) {
+        flattenTasks(task.children);
+      }
+    });
+  };
+
+  flattenTasks(filteredTasks);
+
+  // Render kanban columns
+  let html = '';
+  state.taskStatuses.forEach(status => {
+    const tasks = tasksByStatus[status] || [];
+    const statusClass = status.toLowerCase().replace(/\s+/g, '-');
+
+    html += `
+      <div class="kanban-column" data-status="${escapeHtml(status)}">
+        <div class="kanban-column-header">
+          <h3>${escapeHtml(status)}</h3>
+          <span class="kanban-column-count">${tasks.length}</span>
+        </div>
+        <div class="kanban-column-content" data-status="${escapeHtml(status)}">
+          ${tasks.length === 0 ? '<p class="kanban-empty-state">No tasks</p>' : tasks.map(task => renderKanbanCard(task)).join('')}
+        </div>
+      </div>
+    `;
+  });
+
+  elements.kanbanBoard.innerHTML = html;
+
+  // Setup drag and drop for kanban cards
+  setupKanbanDragAndDrop();
+}
+
+function renderKanbanCard(task) {
+  const priorityIcon = task.priority === 'high' ? '⚠' : '○';
+  const priorityClass = task.priority === 'high' ? 'priority-high' : 'priority-normal';
+  const isDeleted = task.deleted || false;
+
+  // Format dates
+  const hasDueDate = task.dueDate && task.dueDate.trim();
+  let dateInfo = '';
+  let isPastDue = false;
+  if (hasDueDate) {
+    const dueDate = new Date(task.dueDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    dueDate.setHours(0, 0, 0, 0);
+
+    isPastDue = dueDate < today && !task.completed;
+    const formattedDate = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    dateInfo = `<span class="kanban-card-date ${isPastDue ? 'past-due' : ''}">${formattedDate}</span>`;
+  }
+
+  return `
+    <div class="kanban-card ${task.completed ? 'completed' : ''}"
+         data-task-id="${task.id}"
+         data-task-path="${escapeHtml(task.filePath)}"
+         data-task-status="${escapeHtml(task.status || 'Pending')}"
+         draggable="true">
+      <div class="kanban-card-header">
+        <span class="task-priority ${priorityClass}">${priorityIcon}</span>
+        <span class="kanban-card-title">${escapeHtml(task.title)}</span>
+      </div>
+      ${dateInfo}
+      ${task.body ? `<div class="kanban-card-description">${escapeHtml(task.body.substring(0, 100))}${task.body.length > 100 ? '...' : ''}</div>` : ''}
+    </div>
+  `;
 }
 
 function renderTaskList(tasks, level) {
@@ -1896,6 +2318,8 @@ function renderTaskList(tasks, level) {
           <span class="task-text">${escapeHtml(task.title)}</span>
 
           ${hasChildren ? `<span class="task-child-count">(${task.children.length})</span>` : ''}
+
+          ${task.status ? `<span class="task-status-badge status-${task.status.toLowerCase().replace(/\s+/g, '-')}">${escapeHtml(task.status)}</span>` : ''}
 
           ${hasDueDate ? `<span class="task-date-indicator ${isPastDue ? 'past-due' : ''} material-icons" title="${escapeHtml(dateTooltip)}">event</span>` : ''}
         </div>
@@ -2003,8 +2427,10 @@ async function handleDrop(e) {
         // Now reorder within the new parent
         await reorderTasks(moveResult.newPath, targetPath);
 
-        // Commit to git if version control is enabled
-        await commitTaskChange(`Move task "${draggedTitle}" to sibling of "${targetTitle}"`);
+        // Commit to git asynchronously (fire-and-forget, don't block UI)
+        commitTaskChange(`Move task "${draggedTitle}" to sibling of "${targetTitle}"`).catch(err => {
+          console.error('Error committing task change:', err);
+        });
       }
     } else {
       // Drop below - make it a child
@@ -2019,8 +2445,10 @@ async function handleDrop(e) {
         state.expandedTasks.add(targetId);
         await loadTasks();
 
-        // Commit to git if version control is enabled
-        await commitTaskChange(`Move task "${draggedTitle}" to child of "${targetTitle}"`);
+        // Commit to git asynchronously (fire-and-forget, don't block UI)
+        commitTaskChange(`Move task "${draggedTitle}" to child of "${targetTitle}"`).catch(err => {
+          console.error('Error committing task change:', err);
+        });
       }
     }
   } catch (error) {
@@ -2406,6 +2834,105 @@ function setupKeyboardShortcuts() {
     updateDeleteButtonStates();
   });
 
+  // Task navigation keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    // Handle Ctrl+Number folder switching (works anywhere, even in input fields)
+    if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
+      const folderIndex = parseInt(e.key) - 1;
+      if (folderIndex < state.taskFolders.length) {
+        e.preventDefault();
+        const folder = state.taskFolders[folderIndex];
+        switchFolder(folder.id);
+        return;
+      }
+    }
+
+    // Handle Ctrl+K for Kanban view and Ctrl+L for List view (works in tasks view)
+    if (state.currentView === 'tasks' && (e.ctrlKey || e.metaKey)) {
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        toggleViewMode('kanban');
+        return;
+      }
+      if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        toggleViewMode('list');
+        return;
+      }
+    }
+
+    // Arrow key navigation - handle these specially
+    const isArrowKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key);
+
+    if (isArrowKey) {
+      // Only handle arrow keys in tasks view and when modal is not open
+      if (state.currentView === 'tasks' && !elements.taskModal.classList.contains('active')) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        switch (e.key) {
+          case 'ArrowUp':
+            navigateTasksVertical('up');
+            break;
+          case 'ArrowDown':
+            navigateTasksVertical('down');
+            break;
+          case 'ArrowLeft':
+            if (state.taskViewMode === 'kanban') {
+              navigateTasksHorizontal('left');
+            }
+            break;
+          case 'ArrowRight':
+            if (state.taskViewMode === 'kanban') {
+              navigateTasksHorizontal('right');
+            }
+            break;
+        }
+        return;
+      }
+    }
+
+    // Handle other task shortcuts
+    if (state.currentView !== 'tasks') {
+      return;
+    }
+
+    // Don't handle if modal is open
+    if (elements.taskModal.classList.contains('active')) {
+      return;
+    }
+
+    // Only block Space, Enter, Delete when in text input fields (except task input)
+    const isInTextInput = e.target.matches('input:not(#task-input):not([type="checkbox"]), textarea:not(#task-input)');
+
+    switch (e.key) {
+      case ' ':
+        if (!isInTextInput) {
+          e.preventDefault();
+          handleTaskKeyboardAction('toggle');
+        }
+        break;
+
+      case 'Enter':
+        if (!isInTextInput) {
+          e.preventDefault();
+          handleTaskKeyboardAction('open');
+        }
+        break;
+
+      case 'Delete':
+        if (!isInTextInput) {
+          e.preventDefault();
+          if (e.ctrlKey || e.metaKey) {
+            handleTaskKeyboardAction('nuclear-delete');
+          } else {
+            handleTaskKeyboardAction('delete');
+          }
+        }
+        break;
+    }
+  }, true); // Use capture phase to ensure we get the event first
+
   document.addEventListener('keydown', async (e) => {
     // Handle Alt+F4 to hide to tray (always works, even in input fields)
     if (e.altKey && e.key === 'F4') {
@@ -2648,6 +3175,11 @@ async function loadOllamaSettings() {
     // Load quick prompts (use defaults if not saved)
     if (result.config.agentQuickPrompts && result.config.agentQuickPrompts.length > 0) {
       state.agentQuickPrompts = result.config.agentQuickPrompts;
+    }
+
+    // Load task statuses (use defaults if not saved)
+    if (result.config.taskStatuses && result.config.taskStatuses.length > 0) {
+      state.taskStatuses = result.config.taskStatuses;
     }
 
     // Update UI
@@ -2898,6 +3430,114 @@ async function deletePrompt(promptId) {
   await saveAllSettings();
   renderPromptsList();
   updateAgentQuickMenu();
+}
+
+// ========================================
+// Task Status Management
+// ========================================
+function renderStatusesList() {
+  if (!elements.statusesList) return;
+
+  if (state.taskStatuses.length === 0) {
+    elements.statusesList.innerHTML = '<p class="setting-description" style="text-align: center; padding: 2rem;">No statuses configured.</p>';
+    return;
+  }
+
+  elements.statusesList.innerHTML = state.taskStatuses.map((status, index) => `
+    <div class="status-item" data-status-index="${index}">
+      <input
+        type="text"
+        class="status-item-text"
+        value="${escapeHtml(status)}"
+        data-status-index="${index}"
+        placeholder="Status name..."
+        ${status === 'Completed' ? 'readonly title="Completed status cannot be renamed"' : ''}
+      />
+      <div class="status-item-actions">
+        ${status !== 'Completed' ? `
+          <button class="status-item-btn" data-action="remove" data-status-index="${index}" title="Delete status">
+            <span class="material-icons">delete</span>
+          </button>
+        ` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  // Add event listeners for status editing
+  elements.statusesList.querySelectorAll('.status-item-text').forEach(input => {
+    input.addEventListener('blur', async (e) => {
+      const statusIndex = parseInt(e.target.dataset.statusIndex);
+      const newText = e.target.value.trim();
+
+      if (newText && statusIndex >= 0 && statusIndex < state.taskStatuses.length) {
+        state.taskStatuses[statusIndex] = newText;
+        await saveAllSettings();
+        updateModalStatusDropdown();
+      }
+    });
+  });
+
+  // Add event listeners for delete buttons
+  elements.statusesList.querySelectorAll('[data-action="remove"]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const statusIndex = parseInt(e.currentTarget.dataset.statusIndex);
+      await deleteStatus(statusIndex);
+    });
+  });
+}
+
+async function addStatus() {
+  const newStatus = 'New Status';
+  state.taskStatuses.push(newStatus);
+  await saveAllSettings();
+  renderStatusesList();
+  updateModalStatusDropdown();
+
+  // Focus the new input
+  setTimeout(() => {
+    const newInput = elements.statusesList.querySelector(`[data-status-index="${state.taskStatuses.length - 1}"]`);
+    if (newInput) {
+      newInput.focus();
+      newInput.select();
+    }
+  }, 100);
+}
+
+async function deleteStatus(statusIndex) {
+  if (statusIndex < 0 || statusIndex >= state.taskStatuses.length) return;
+
+  const statusToDelete = state.taskStatuses[statusIndex];
+
+  // Cannot delete Completed status
+  if (statusToDelete === 'Completed') {
+    alert('Cannot delete the Completed status.');
+    return;
+  }
+
+  if (!confirm(`Are you sure you want to delete the status "${statusToDelete}"? Tasks with this status will remain unchanged.`)) {
+    return;
+  }
+
+  state.taskStatuses.splice(statusIndex, 1);
+  await saveAllSettings();
+  renderStatusesList();
+  updateModalStatusDropdown();
+}
+
+function updateModalStatusDropdown() {
+  if (!elements.modalStatus) return;
+
+  const currentValue = elements.modalStatus.value;
+
+  // Rebuild dropdown options
+  elements.modalStatus.innerHTML = state.taskStatuses.map(status => `
+    <option value="${escapeHtml(status)}">${escapeHtml(status)}</option>
+  `).join('');
+
+  // Restore selected value if it still exists
+  if (state.taskStatuses.includes(currentValue)) {
+    elements.modalStatus.value = currentValue;
+  }
 }
 
 // ========================================
@@ -3177,6 +3817,14 @@ function setupEventListeners() {
     }
   });
 
+  // View Toggle
+  if (elements.viewListBtn) {
+    elements.viewListBtn.addEventListener('click', () => toggleViewMode('list'));
+  }
+  if (elements.viewKanbanBtn) {
+    elements.viewKanbanBtn.addEventListener('click', () => toggleViewMode('kanban'));
+  }
+
   // Clipboard paste button
   elements.taskInput.addEventListener('focus', checkClipboardAndShowPasteButton);
   elements.taskInput.addEventListener('blur', () => {
@@ -3200,17 +3848,21 @@ function setupEventListeners() {
       return;
     }
 
-    // Handle restore button
-    if (e.target.classList.contains('task-restore')) {
-      const taskItem = e.target.closest('.task-item');
+    // Handle restore button (check if click is on or inside the restore button)
+    const restoreBtn = e.target.closest('.task-restore');
+    if (restoreBtn) {
+      e.stopPropagation(); // Prevent modal from opening
+      const taskItem = restoreBtn.closest('.task-item');
       const taskPath = taskItem.dataset.taskPath;
       restoreTask(taskPath);
       return;
     }
 
-    // Handle delete button
-    if (e.target.classList.contains('task-delete')) {
-      const taskItem = e.target.closest('.task-item');
+    // Handle delete button (check if click is on or inside the delete button)
+    const deleteBtn = e.target.closest('.task-delete');
+    if (deleteBtn) {
+      e.stopPropagation(); // Prevent modal from opening
+      const taskItem = deleteBtn.closest('.task-item');
       const taskPath = taskItem.dataset.taskPath;
       const isDeleted = taskItem.dataset.taskDeleted === 'true';
       const forcePermDelete = e.ctrlKey || e.metaKey; // Ctrl on Windows/Linux, Cmd on Mac
@@ -3278,6 +3930,11 @@ function setupEventListeners() {
     elements.addPromptBtn.addEventListener('click', addPrompt);
   }
 
+  // Status management
+  if (elements.addStatusBtn) {
+    elements.addStatusBtn.addEventListener('click', addStatus);
+  }
+
   // Add Folder Modal
   elements.browseFolderBtn.addEventListener('click', browseFolderForModal);
   elements.addFolderCancelBtn.addEventListener('click', closeAddFolderModal);
@@ -3328,6 +3985,21 @@ function setupEventListeners() {
     if (state.editingTask && state.editingTask.deleted) {
       await restoreTask(state.editingTask.filePath);
       closeTaskModal();
+    }
+  });
+
+  // Parent task link click handler
+  elements.modalParent.addEventListener('click', () => {
+    const parentId = elements.modalParent.dataset.parentId;
+    if (parentId) {
+      const parentTask = findTaskById(state.tasks, parseInt(parentId));
+      if (parentTask) {
+        closeTaskModal();
+        // Small delay to allow modal close animation
+        setTimeout(() => {
+          openTaskModal(parentTask);
+        }, 100);
+      }
     }
   });
 
@@ -3472,6 +4144,144 @@ function findTaskByPath(tasks, filePath) {
     }
   }
   return null;
+}
+
+// ========================================
+// Kanban Drag and Drop
+// ========================================
+function setupKanbanDragAndDrop() {
+  const kanbanCards = elements.kanbanBoard.querySelectorAll('.kanban-card');
+  const kanbanColumns = elements.kanbanBoard.querySelectorAll('.kanban-column-content');
+
+  kanbanCards.forEach(card => {
+    card.addEventListener('dragstart', handleKanbanDragStart);
+    card.addEventListener('dragend', handleKanbanDragEnd);
+    card.addEventListener('click', handleKanbanCardClick);
+  });
+
+  kanbanColumns.forEach(column => {
+    column.addEventListener('dragover', handleKanbanDragOver);
+    column.addEventListener('drop', handleKanbanDrop);
+    column.addEventListener('dragleave', handleKanbanDragLeave);
+  });
+}
+
+function handleKanbanDragStart(e) {
+  const card = e.currentTarget;
+  state.draggedTask = {
+    path: card.dataset.taskPath,
+    id: parseInt(card.dataset.taskId),
+    currentStatus: card.dataset.taskStatus
+  };
+
+  card.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function handleKanbanDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+
+  const column = e.currentTarget;
+  column.classList.add('drag-over');
+}
+
+function handleKanbanDragLeave(e) {
+  const column = e.currentTarget;
+  // Only remove if we're actually leaving the column
+  if (!column.contains(e.relatedTarget)) {
+    column.classList.remove('drag-over');
+  }
+}
+
+async function handleKanbanDrop(e) {
+  e.preventDefault();
+
+  const column = e.currentTarget;
+  column.classList.remove('drag-over');
+
+  if (!state.draggedTask) return;
+
+  const newStatus = column.dataset.status;
+  const taskPath = state.draggedTask.path;
+
+  // If status hasn't changed, no need to update
+  if (newStatus === state.draggedTask.currentStatus) {
+    return;
+  }
+
+  try {
+    // Get task info for commit message
+    const task = findTaskByPath(state.tasks, taskPath);
+    const taskTitle = task ? task.title : 'Unknown task';
+
+    // Update the task status
+    const result = await window.electronAPI.tasks.update(taskPath, {
+      status: newStatus
+    });
+
+    if (result.success) {
+      await loadTasks();
+
+      // Commit to git asynchronously (fire-and-forget, don't block UI)
+      commitTaskChange(`Change status of "${taskTitle}" to ${newStatus}`).catch(err => {
+        console.error('Error committing task change:', err);
+      });
+    } else {
+      console.error('Failed to update task status:', result.error);
+    }
+  } catch (error) {
+    console.error('Error updating task status:', error);
+  }
+}
+
+function handleKanbanDragEnd(e) {
+  const card = e.currentTarget;
+  card.classList.remove('dragging');
+
+  // Remove drag-over from all columns
+  document.querySelectorAll('.kanban-column-content').forEach(col => {
+    col.classList.remove('drag-over');
+  });
+
+  state.draggedTask = null;
+}
+
+function handleKanbanCardClick(e) {
+  // Don't open modal if we're dragging
+  if (state.draggedTask) return;
+
+  const card = e.currentTarget;
+  const taskId = parseInt(card.dataset.taskId);
+  const task = findTaskById(state.tasks, taskId);
+
+  if (task) {
+    openTaskModal(task);
+  }
+}
+
+// ========================================
+// View Toggle
+// ========================================
+async function toggleViewMode(mode) {
+  state.taskViewMode = mode;
+
+  // Update button states
+  if (elements.viewListBtn && elements.viewKanbanBtn) {
+    if (mode === 'list') {
+      elements.viewListBtn.classList.add('active');
+      elements.viewKanbanBtn.classList.remove('active');
+    } else {
+      elements.viewListBtn.classList.remove('active');
+      elements.viewKanbanBtn.classList.add('active');
+    }
+  }
+
+  // Re-render with new view mode
+  renderTasks();
+
+  // Save preference
+  await saveAllSettings();
 }
 
 // ========================================

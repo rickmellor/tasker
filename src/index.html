@@ -88,6 +88,14 @@
                 <button id="expand-collapse-btn" class="icon-btn" title="Expand All">
                   <span id="expand-collapse-icon">⊞</span>
                 </button>
+                <div class="view-toggle">
+                  <button id="view-list-btn" class="view-toggle-btn active" title="List View">
+                    <span class="material-icons">view_list</span>
+                  </button>
+                  <button id="view-kanban-btn" class="view-toggle-btn" title="Kanban View">
+                    <span class="material-icons">view_kanban</span>
+                  </button>
+                </div>
                 <div class="filter-dropdown">
                   <button id="filter-toggle-btn" class="filter-toggle">
                     <span id="filter-label">Filters</span>
@@ -173,6 +181,11 @@
                 </div>
               </section>
 
+              <!-- Kanban Board -->
+              <section class="kanban-board-section" id="kanbanBoard" style="display: none;">
+                <!-- Kanban columns will be rendered here -->
+              </section>
+
               <!-- Git Timeline Ribbon -->
               <section class="timeline-section" id="timeline-section" style="display: none;">
                 <div class="timeline-container" id="timeline-container">
@@ -256,6 +269,54 @@
                   <div class="shortcut-item">
                     <kbd>Ctrl</kbd> + <span style="font-size: 0.9rem;">Click ✕</span>
                     <span class="shortcut-description">Exit application completely (hold Ctrl when clicking close button)</span>
+                  </div>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>View Switching</h4>
+                  <div class="shortcut-item">
+                    <kbd>Ctrl</kbd> + <kbd>K</kbd>
+                    <span class="shortcut-description">Switch to Kanban view</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>Ctrl</kbd> + <kbd>L</kbd>
+                    <span class="shortcut-description">Switch to List view</span>
+                  </div>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>Folder Switching</h4>
+                  <div class="shortcut-item">
+                    <kbd>Ctrl</kbd> + <kbd>1</kbd>...<kbd>9</kbd>
+                    <span class="shortcut-description">Switch to folder 1-9 (works anywhere in app)</span>
+                  </div>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>Task Navigation</h4>
+                  <div class="shortcut-item">
+                    <kbd>↑</kbd> / <kbd>↓</kbd>
+                    <span class="shortcut-description">Navigate up/down between tasks</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>←</kbd> / <kbd>→</kbd>
+                    <span class="shortcut-description">Navigate left/right between Kanban columns</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>Space</kbd>
+                    <span class="shortcut-description">Expand/collapse selected task (if it has children)</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>Enter</kbd>
+                    <span class="shortcut-description">Open detail dialog for selected task</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>Delete</kbd>
+                    <span class="shortcut-description">Soft delete selected task (move to deleted folder)</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>Ctrl</kbd> + <kbd>Delete</kbd>
+                    <span class="shortcut-description">Permanently delete selected task</span>
                   </div>
                 </div>
 
@@ -634,6 +695,24 @@
               </div>
 
               <div class="settings-section">
+                <h3>Task Statuses</h3>
+
+                <div class="setting-item">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <label>Statuses</label>
+                    <button id="add-status-btn" class="btn-secondary">
+                      <span class="material-icons" style="font-size: 18px; vertical-align: middle;">add</span>
+                      Add Status
+                    </button>
+                  </div>
+                  <div id="statuses-list" class="statuses-list">
+                    <!-- Statuses will be added here dynamically -->
+                  </div>
+                  <p class="setting-description">Customize task statuses. The "Completed" status is required and represents a finished task.</p>
+                </div>
+              </div>
+
+              <div class="settings-section">
                 <h3>AI Agent Quick Prompts</h3>
 
                 <div class="setting-item">
@@ -735,10 +814,10 @@
             </div>
 
             <div class="form-group">
-              <label for="modal-completed">
-                <input type="checkbox" id="modal-completed" style="width: auto; margin-right: 0.5rem;" />
-                Completed
-              </label>
+              <label for="modal-status">Status</label>
+              <select id="modal-status" class="select">
+                <option value="Pending">Pending</option>
+              </select>
             </div>
 
             <div class="form-group">
@@ -750,6 +829,11 @@
           <div class="form-group">
             <label>Created</label>
             <input type="text" id="modal-created" class="input-lg" readonly disabled />
+          </div>
+
+          <div class="form-group" id="modal-parent-container" style="display: none;">
+            <label>Parent Task</label>
+            <div id="modal-parent" class="parent-task-link"></div>
           </div>
         </div>
 
