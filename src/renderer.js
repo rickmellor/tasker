@@ -866,6 +866,10 @@ async function commitTaskChange(message) {
       return;
     }
 
+    // Wait a moment to ensure file operations are complete
+    // This is necessary because task file writes might be async/buffered
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     // Stage all changes
     const addResult = await window.electronAPI.git.add(state.gitPath, currentFolder.path, '.');
     if (!addResult.success) {

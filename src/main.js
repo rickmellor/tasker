@@ -915,6 +915,23 @@ ipcMain.handle('git:init', async (_event, gitPath, folderPath) => {
 
 ipcMain.handle('git:add', async (_event, gitPath, folderPath, files = ['.']) => {
   try {
+    // First, check what git sees as untracked/modified
+    let statusCommand;
+    if (process.platform === 'win32' && gitPath.includes(':\\')) {
+      if (gitPath.includes(' ')) {
+        statusCommand = `cmd.exe /c "cd /d "${folderPath}" && "${gitPath}" status --short"`;
+      } else {
+        statusCommand = `cmd.exe /c cd /d "${folderPath}" && ${gitPath} status --short`;
+      }
+    } else {
+      const gitCmd = gitPath.includes(' ') ? `"${gitPath}"` : gitPath;
+      statusCommand = `cd "${folderPath}" && ${gitCmd} status --short`;
+    }
+
+    console.log(`Running git status before add: ${statusCommand}`);
+    const statusResult = await execAsync(statusCommand, { timeout: 5000 });
+    console.log(`Git status before add:\n${statusResult.stdout}`);
+
     // files parameter can be an array of file paths or a single path
     // Default to '.' to add all changes
     const filesToAdd = Array.isArray(files) ? files.join(' ') : files;
