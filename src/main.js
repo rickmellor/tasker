@@ -209,13 +209,20 @@ async function initializeSettings() {
     const autoLaunch = config.autoLaunch !== undefined ? config.autoLaunch : true;
     const startMinimized = config.startMinimized !== undefined ? config.startMinimized : true;
 
-    app.setLoginItemSettings({
-      openAtLogin: autoLaunch,
-      openAsHidden: startMinimized,
-      args: []
-    });
-    console.log(`Auto-launch initialized: ${autoLaunch ? 'enabled' : 'disabled'}`);
-    console.log(`Start minimized: ${startMinimized ? 'enabled' : 'disabled'}`);
+    // Only enable auto-launch for packaged apps
+    // In development, electron.exe would launch without the app path
+    if (app.isPackaged) {
+      app.setLoginItemSettings({
+        openAtLogin: autoLaunch,
+        openAsHidden: startMinimized,
+        args: []
+      });
+      console.log(`Auto-launch initialized: ${autoLaunch ? 'enabled' : 'disabled'}`);
+      console.log(`Start minimized: ${startMinimized ? 'enabled' : 'disabled'}`);
+    } else {
+      console.log('Auto-launch disabled in development mode');
+      console.log('Auto-launch only works when app is built/packaged');
+    }
 
     // If we should start minimized and the app was launched at login, hide the window
     if (startMinimized && app.getLoginItemSettings().wasOpenedAtLogin && mainWindow) {
@@ -368,6 +375,12 @@ ipcMain.handle('update-global-hotkey', async (_event, accelerator) => {
 
 ipcMain.handle('set-auto-launch', async (_event, enabled, startMinimized) => {
   try {
+    // Only allow auto-launch for packaged apps
+    if (!app.isPackaged) {
+      console.log('Auto-launch can only be set for packaged/built applications');
+      return { success: false, error: 'Auto-launch only works for built applications. Please build the app first.' };
+    }
+
     app.setLoginItemSettings({
       openAtLogin: enabled,
       openAsHidden: startMinimized || false,
