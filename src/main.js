@@ -979,7 +979,9 @@ ipcMain.handle('git:commit', async (_event, gitPath, folderPath, message) => {
   } catch (error) {
     // Note: git commit returns exit code 1 when there's nothing to commit
     // This is not necessarily an error we want to report to the user
-    if (error.message.includes('nothing to commit')) {
+    // Check both error message and stdout for "nothing to commit"
+    const errorText = (error.message || '') + (error.stdout || '');
+    if (errorText.includes('nothing to commit') || errorText.includes('working tree clean')) {
       console.log('Git: Nothing to commit (working tree clean)');
       return { success: true, output: 'Nothing to commit' };
     }
