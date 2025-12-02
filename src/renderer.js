@@ -16,6 +16,7 @@ const state = {
   activeFilters: new Set(['all']), // Track active filters
   sortOrder: 'default', // Track sort order: default, priority, due-date, created
   sidebarWidth: 200, // Sidebar width in pixels
+  agentHeight: 300, // Agent section height in pixels
   windowBounds: null, // Window size and position
   globalHotkey: 'CommandOrControl+Alt+T', // Global hotkey for quick add (Electron accelerator format)
   autoLaunch: true, // Launch on Windows startup (default enabled)
@@ -177,6 +178,8 @@ const elements = {
   sidebarResizeHandle: document.querySelector('.sidebar-resize-handle'),
 
   // Agent
+  sidebarAgent: document.getElementById('sidebar-agent'),
+  agentResizeHandle: document.getElementById('agent-resize-handle'),
   agentMessages: document.getElementById('agent-messages'),
   agentInput: document.getElementById('agent-input'),
   agentSendBtn: document.getElementById('agent-send-btn'),
@@ -907,6 +910,52 @@ function setupSidebarResize() {
   });
 }
 
+function setupAgentResize() {
+  if (!elements.agentResizeHandle) return;
+
+  let isResizing = false;
+  let startY = 0;
+  let startHeight = 0;
+
+  elements.agentResizeHandle.addEventListener('mousedown', (e) => {
+    isResizing = true;
+    startY = e.clientY;
+    startHeight = state.agentHeight;
+
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+
+    const deltaY = e.clientY - startY;
+    // Invert deltaY: dragging down (positive deltaY) should decrease height
+    const newHeight = Math.max(150, Math.min(600, startHeight - deltaY));
+
+    state.agentHeight = newHeight;
+    applyAgentHeight(newHeight);
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isResizing) {
+      isResizing = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+
+      // Save the new height
+      saveAllSettings();
+    }
+  });
+}
+
+function applyAgentHeight(height) {
+  if (!elements.sidebarAgent) return;
+  elements.sidebarAgent.style.height = `${height}px`;
+}
+
 // ========================================
 // UI State Restoration
 // ========================================
@@ -953,6 +1002,11 @@ function restoreUIState() {
       elements.viewListBtn.classList.remove('active');
       elements.viewKanbanBtn.classList.add('active');
     }
+  }
+
+  // Restore agent height
+  if (state.agentHeight) {
+    applyAgentHeight(state.agentHeight);
   }
 }
 
@@ -4794,6 +4848,9 @@ async function init() {
 
     // Setup sidebar resizing
     setupSidebarResize();
+
+    // Setup agent resizing
+    setupAgentResize();
 
     // Setup hotkey recorder
     setupHotkeyRecorder();

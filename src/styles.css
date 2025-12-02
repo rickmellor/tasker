@@ -381,15 +381,30 @@ body[data-theme="dark"] .folder-git-icon-dark {
 /* ========================================
    Sidebar AI Agent
    ======================================== */
+.agent-resize-handle {
+  height: 4px;
+  width: 100%;
+  cursor: ns-resize;
+  background: transparent;
+  z-index: 10;
+  flex-shrink: 0;
+}
+
+.agent-resize-handle:hover {
+  background: var(--accent-primary);
+}
+
 .sidebar-agent {
   display: flex;
   flex-direction: column;
   border-top: 1px solid var(--border-color);
   background: var(--bg-secondary);
-  max-height: 400px;
-  min-height: 200px;
+  height: 300px; /* Default height, will be saved to config */
+  min-height: 150px;
+  max-height: 600px;
   min-width: 0; /* Allow content to shrink */
-  overflow: hidden; /* Prevent overflow from this container */
+  overflow: visible; /* Allow dropdown menu to be visible */
+  flex-shrink: 0; /* Prevent the agent section from shrinking */
 }
 
 .agent-header {
@@ -441,6 +456,7 @@ body[data-theme="dark"] .folder-git-icon-dark {
 .agent-quick-dropdown {
   position: relative;
   flex-shrink: 0; /* Don't shrink the dropdown container */
+  z-index: 1001; /* Ensure dropdown and its menu appear above all other content */
 }
 
 .agent-quick-btn {
@@ -484,7 +500,7 @@ body[data-theme="dark"] .folder-git-icon-dark {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   box-shadow: var(--shadow-lg);
-  z-index: 100;
+  z-index: 1000;
   overflow: hidden;
 }
 
@@ -505,6 +521,9 @@ body[data-theme="dark"] .folder-git-icon-dark {
   cursor: pointer;
   transition: background 0.15s;
   font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agent-quick-option:last-child {
@@ -637,7 +656,7 @@ body[data-theme="dark"] .folder-git-icon-dark {
   padding: 0.5rem;
   border-top: 1px solid var(--border-color);
   min-width: 0; /* Allow flex items to shrink */
-  overflow: hidden; /* Prevent overflow */
+  overflow: visible; /* Allow dropdown menu to be visible */
 }
 
 .agent-input {
