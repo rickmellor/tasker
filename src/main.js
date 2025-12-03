@@ -6,6 +6,7 @@ const fs = require('fs').promises;
 const taskStorage = require('./taskStorage');
 const DropboxClient = require('./dropboxClient');
 const RamdiskManager = require('./ramdiskManager');
+const DropboxStorage = require('./dropboxStorage');
 
 const execAsync = promisify(exec);
 
@@ -15,6 +16,9 @@ let tray = null;
 let isQuittingFromCtrlClick = false;
 let dropboxClient = null;
 let ramdiskManager = null;
+let dropboxStorages = new Map(); // folderId -> DropboxStorage instance
+let currentFolderId = null; // Track which folder is currently active
+let currentFolderInfo = null; // Store current folder config
 
 async function createWindow() {
   // Hide the menu bar
@@ -371,13 +375,36 @@ app.on('activate', () => {
   }
 });
 
-app.on('before-quit', async () => {
-  // Unregister all global shortcuts before quitting
-  globalShortcut.unregisterAll();
+app.on('before-quit', async (event) => {
+  console.log('[Main] before-quit event triggered');
 
-  // Clean up all ramdisks
-  if (ramdiskManager) {
-    await ramdiskManager.cleanupAll();
+  // Prevent immediate quit to allow cleanup
+  event.preventDefault();
+
+  try {
+    // Unregister all global shortcuts before quitting
+    globalShortcut.unregisterAll();
+
+    // Clean up all DropboxStorage instances (stops watchers and cleans ramdisks)
+    console.log(`[Main] Cleaning up ${dropboxStorages.size} DropboxStorage instances`);
+    for (const [folderId, dropboxStorage] of dropboxStorages.entries()) {
+      console.log(`[Main] Cleaning up DropboxStorage for folder ${folderId}`);
+      await dropboxStorage.cleanup(folderId);
+    }
+    dropboxStorages.clear();
+
+    // Clean up any remaining ramdisks
+    if (ramdiskManager) {
+      console.log('[Main] Cleaning up remaining ramdisks');
+      await ramdiskManager.cleanupAll();
+    }
+
+    console.log('[Main] Cleanup complete, quitting app');
+  } catch (error) {
+    console.error('[Main] Error during cleanup:', error);
+  } finally {
+    // Now allow quit
+    app.exit(0);
   }
 });
 
@@ -558,7 +585,61 @@ ipcMain.on('set-ctrl-key-state', (_event, isPressed) => {
   isCtrlKeyPressed = isPressed;
 });
 
+// ========================================
+// Storage Helper Functions
+// ========================================
+
+/**
+ * Get the appropriate storage instance for the current folder
+ * Returns DropboxStorage for Dropbox folders, plain taskStorage otherwise
+ */
+function getStorage() {
+  if (currentFolderId && dropboxStorages.has(currentFolderId)) {
+    return dropboxStorages.get(currentFolderId).getTaskStorage();
+  }
+  return taskStorage;
+}
+
+/**
+ * Initialize storage for a folder (either local or Dropbox)
+ * If the folder is a Dropbox folder, this will create a DropboxStorage instance
+ * and start file watching
+ */
+async function initializeFolderStorage(folderId, folderPath, storageType, dropboxPath) {
+  if (storageType === 'dropbox' && dropboxPath) {
+    console.log(`[DropboxStorage] Initializing Dropbox storage for folder ${folderId}`);
+
+    // Create DropboxStorage instance, passing the taskStorage singleton
+    const dropboxStorage = new DropboxStorage(dropboxClient, ramdiskManager, taskStorage);
+
+    // Initialize and start watching
+    await dropboxStorage.initialize(folderId, dropboxPath);
+
+    // Store the instance
+    dropboxStorages.set(folderId, dropboxStorage);
+
+    console.log(`[DropboxStorage] Started watching folder ${folderId} at ${folderPath}`);
+  } else {
+    // Local folder - just initialize plain taskStorage
+    await taskStorage.initialize(folderPath);
+  }
+}
+
+/**
+ * Stop watching and cleanup a Dropbox folder
+ */
+async function cleanupFolderStorage(folderId) {
+  if (dropboxStorages.has(folderId)) {
+    const dropboxStorage = dropboxStorages.get(folderId);
+    await dropboxStorage.cleanup(folderId);
+    dropboxStorages.delete(folderId);
+    console.log(`[DropboxStorage] Cleaned up folder ${folderId}`);
+  }
+}
+
+// ========================================
 // Task Storage IPC handlers
+// ========================================
 
 ipcMain.handle('tasks:initialize', async (_event, customPath) => {
   try {
@@ -585,10 +666,37 @@ ipcMain.handle('tasks:select-folder', async () => {
   return null;
 });
 
+// Set the current folder (called when user switches folders)
+ipcMain.handle('tasks:set-current-folder', async (_event, folderInfo) => {
+  try {
+    const { id, path: folderPath, storageType, dropboxPath } = folderInfo;
+
+    console.log(`[Main] Setting current folder: ${id} (${storageType})`);
+
+    // Store current folder info
+    currentFolderId = id;
+    currentFolderInfo = folderInfo;
+
+    // If this is a Dropbox folder and we don't have a storage instance yet, create one
+    if (storageType === 'dropbox' && dropboxPath && !dropboxStorages.has(id)) {
+      await initializeFolderStorage(id, folderPath, storageType, dropboxPath);
+    } else if (storageType === 'local') {
+      // Initialize plain taskStorage for local folders
+      await taskStorage.initialize(folderPath);
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error setting current folder:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('tasks:load', async (_event, dirPath) => {
   try {
-    const basePath = dirPath || taskStorage.getTasksPath();
-    const tasks = await taskStorage.loadTasks(basePath, true);
+    const storage = getStorage();
+    const basePath = dirPath || storage.getTasksPath();
+    const tasks = await storage.loadTasks(basePath, true);
     return { success: true, tasks };
   } catch (error) {
     return { success: false, error: error.message };
@@ -597,7 +705,8 @@ ipcMain.handle('tasks:load', async (_event, dirPath) => {
 
 ipcMain.handle('tasks:create', async (_event, parentPath, text, body) => {
   try {
-    const task = await taskStorage.createTask(parentPath, text, body);
+    const storage = getStorage();
+    const task = await storage.createTask(parentPath, text, body);
     return { success: true, task };
   } catch (error) {
     return { success: false, error: error.message };
@@ -606,7 +715,8 @@ ipcMain.handle('tasks:create', async (_event, parentPath, text, body) => {
 
 ipcMain.handle('tasks:update', async (_event, taskPath, updates) => {
   try {
-    const task = await taskStorage.updateTask(taskPath, updates);
+    const storage = getStorage();
+    const task = await storage.updateTask(taskPath, updates);
     return { success: true, task };
   } catch (error) {
     return { success: false, error: error.message };
@@ -615,7 +725,8 @@ ipcMain.handle('tasks:update', async (_event, taskPath, updates) => {
 
 ipcMain.handle('tasks:delete', async (_event, taskPath) => {
   try {
-    await taskStorage.deleteTask(taskPath);
+    const storage = getStorage();
+    await storage.deleteTask(taskPath);
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -624,7 +735,8 @@ ipcMain.handle('tasks:delete', async (_event, taskPath) => {
 
 ipcMain.handle('tasks:move-to-parent', async (_event, taskPath, newParentTaskPath) => {
   try {
-    const newPath = await taskStorage.moveTaskToParent(taskPath, newParentTaskPath);
+    const storage = getStorage();
+    const newPath = await storage.moveTaskToParent(taskPath, newParentTaskPath);
     return { success: true, newPath };
   } catch (error) {
     return { success: false, error: error.message };
@@ -633,7 +745,8 @@ ipcMain.handle('tasks:move-to-parent', async (_event, taskPath, newParentTaskPat
 
 ipcMain.handle('tasks:move-to-sibling', async (_event, taskPath, targetTaskPath) => {
   try {
-    const newPath = await taskStorage.moveTaskToSibling(taskPath, targetTaskPath);
+    const storage = getStorage();
+    const newPath = await storage.moveTaskToSibling(taskPath, targetTaskPath);
     return { success: true, newPath };
   } catch (error) {
     return { success: false, error: error.message };
@@ -642,7 +755,8 @@ ipcMain.handle('tasks:move-to-sibling', async (_event, taskPath, targetTaskPath)
 
 ipcMain.handle('tasks:reorder', async (_event, dirPath, orderedFileNames) => {
   try {
-    await taskStorage.reorderTasks(dirPath, orderedFileNames);
+    const storage = getStorage();
+    await storage.reorderTasks(dirPath, orderedFileNames);
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -651,8 +765,9 @@ ipcMain.handle('tasks:reorder', async (_event, dirPath, orderedFileNames) => {
 
 ipcMain.handle('tasks:search', async (_event, searchText) => {
   try {
-    const basePath = taskStorage.getTasksPath();
-    const results = await taskStorage.searchTasks(basePath, searchText);
+    const storage = getStorage();
+    const basePath = storage.getTasksPath();
+    const results = await storage.searchTasks(basePath, searchText);
     return { success: true, results };
   } catch (error) {
     return { success: false, error: error.message };
@@ -661,7 +776,25 @@ ipcMain.handle('tasks:search', async (_event, searchText) => {
 
 ipcMain.handle('tasks:clear-deleted', async () => {
   try {
-    await taskStorage.clearDeletedItems();
+    const storage = getStorage();
+    await storage.clearDeletedItems();
+
+    // Debug logging
+    console.log('[Main] Clear deleted items complete. Checking for Dropbox sync...');
+    console.log(`[Main] currentFolderId: ${currentFolderId}`);
+    console.log(`[Main] currentFolderInfo:`, currentFolderInfo);
+    console.log(`[Main] dropboxStorages.has(${currentFolderId}): ${dropboxStorages.has(currentFolderId)}`);
+
+    // Manually trigger Dropbox sync if this is a Dropbox folder
+    if (currentFolderId && currentFolderInfo && dropboxStorages.has(currentFolderId)) {
+      console.log(`[Main] storageType: ${currentFolderInfo.storageType}, dropboxPath: ${currentFolderInfo.dropboxPath}`);
+      if (currentFolderInfo.storageType === 'dropbox' && currentFolderInfo.dropboxPath) {
+        console.log('[Main] Manually triggering Dropbox sync after clearing deleted items');
+        const dropboxStorage = dropboxStorages.get(currentFolderId);
+        await dropboxStorage.manualPush(currentFolderId, currentFolderInfo.dropboxPath);
+      }
+    }
+
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };
@@ -670,7 +803,8 @@ ipcMain.handle('tasks:clear-deleted', async () => {
 
 ipcMain.handle('tasks:restore', async (_event, taskPath) => {
   try {
-    const restoredPath = await taskStorage.restoreTask(taskPath);
+    const storage = getStorage();
+    const restoredPath = await storage.restoreTask(taskPath);
     return { success: true, restoredPath };
   } catch (error) {
     return { success: false, error: error.message };
@@ -679,7 +813,18 @@ ipcMain.handle('tasks:restore', async (_event, taskPath) => {
 
 ipcMain.handle('tasks:permanently-delete', async (_event, taskPath) => {
   try {
-    await taskStorage.permanentlyDeleteTask(taskPath);
+    const storage = getStorage();
+    await storage.permanentlyDeleteTask(taskPath);
+
+    // Manually trigger Dropbox sync if this is a Dropbox folder
+    if (currentFolderId && currentFolderInfo && dropboxStorages.has(currentFolderId)) {
+      if (currentFolderInfo.storageType === 'dropbox' && currentFolderInfo.dropboxPath) {
+        console.log('[Main] Manually triggering Dropbox sync after permanently deleting task');
+        const dropboxStorage = dropboxStorages.get(currentFolderId);
+        await dropboxStorage.manualPush(currentFolderId, currentFolderInfo.dropboxPath);
+      }
+    }
+
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };

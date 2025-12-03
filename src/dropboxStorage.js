@@ -4,14 +4,14 @@ const { EventEmitter } = require('events');
 
 /**
  * Dropbox Storage Manager
- * Extends TaskStorage to add automatic Dropbox syncing via file watching
+ * Wraps TaskStorage to add automatic Dropbox syncing via file watching
  */
 class DropboxStorage extends EventEmitter {
-  constructor(dropboxClient, ramdiskManager) {
+  constructor(dropboxClient, ramdiskManager, taskStorage) {
     super();
     this.dropboxClient = dropboxClient;
     this.ramdiskManager = ramdiskManager;
-    this.taskStorage = new TaskStorage();
+    this.taskStorage = taskStorage; // Use provided TaskStorage instance
     this.watchers = new Map(); // folderId -> watcher instance
     this.syncInProgress = new Map(); // folderId -> boolean
     this.syncQueue = new Map(); // folderId -> array of pending changes
@@ -24,8 +24,13 @@ class DropboxStorage extends EventEmitter {
    * @returns {Promise<string>} - Ramdisk path where tasks are stored
    */
   async initialize(folderId, dropboxPath) {
-    // Get or create ramdisk path
-    const ramdiskPath = this.ramdiskManager.getRamdiskPath(folderId);
+    // Create ramdisk for this folder
+    const ramdiskResult = await this.ramdiskManager.createRamdisk(folderId);
+    if (!ramdiskResult.success) {
+      throw new Error(`Failed to create ramdisk: ${ramdiskResult.error}`);
+    }
+
+    const ramdiskPath = ramdiskResult.path;
 
     // Initialize TaskStorage with ramdisk path
     await this.taskStorage.initialize(ramdiskPath);
@@ -50,18 +55,15 @@ class DropboxStorage extends EventEmitter {
 
       const ramdiskPath = this.ramdiskManager.getRamdiskPath(folderId);
 
-      // List all files in Dropbox folder recursively
-      const files = await this.dropboxClient.listFolderRecursive(dropboxPath);
+      // Download entire Dropbox folder to ramdisk recursively
+      const downloadResult = await this.dropboxClient.downloadFolderRecursive(dropboxPath, ramdiskPath);
 
-      // Download each file to ramdisk
-      for (const file of files) {
-        if (!file.isFolder) {
-          const relativePath = file.path.substring(dropboxPath.length);
-          await this.dropboxClient.downloadToRamdisk(file.path, folderId, relativePath);
-        }
+      if (!downloadResult.success) {
+        throw new Error(downloadResult.error);
       }
 
-      this.emit('sync-complete', { folderId, direction: 'pull', filesCount: files.length });
+      this.emit('sync-complete', { folderId, direction: 'pull', filesCount: downloadResult.filesDownloaded });
+      console.log(`[DropboxStorage] Pulled ${downloadResult.filesDownloaded} files from Dropbox`);
     } catch (error) {
       this.emit('sync-error', { folderId, direction: 'pull', error: error.message });
       throw error;
@@ -69,7 +71,7 @@ class DropboxStorage extends EventEmitter {
   }
 
   /**
-   * Push files from ramdisk to Dropbox
+   * Push files from ramdisk to Dropbox (sync: upload new/modified, delete removed)
    * @param {string} folderId - Unique folder ID
    * @param {string} dropboxPath - Path in Dropbox
    */
@@ -86,18 +88,52 @@ class DropboxStorage extends EventEmitter {
 
       const ramdiskPath = this.ramdiskManager.getRamdiskPath(folderId);
 
-      // Get all files in ramdisk recursively
-      const files = await this.ramdiskManager.listFiles(ramdiskPath);
+      // Get list of files in ramdisk
+      const ramdiskFiles = await this.ramdiskManager.listFiles(ramdiskPath);
+      const ramdiskRelativePaths = new Set(
+        ramdiskFiles.map(file => file.substring(ramdiskPath.length).replace(/^[\/\\]/, ''))
+      );
 
-      // Upload each file to Dropbox
-      let uploadCount = 0;
-      for (const file of files) {
-        const relativePath = file.substring(ramdiskPath.length);
-        await this.dropboxClient.uploadFromRamdisk(folderId, relativePath, dropboxPath + relativePath);
-        uploadCount++;
+      // Get list of files in Dropbox
+      let dropboxFiles = [];
+      try {
+        dropboxFiles = await this.dropboxClient.listFolderRecursive(dropboxPath);
+      } catch (error) {
+        console.log(`[DropboxStorage] Dropbox folder doesn't exist yet, will create it`);
       }
 
-      this.emit('sync-complete', { folderId, direction: 'push', filesCount: uploadCount });
+      const dropboxRelativePaths = new Set(
+        dropboxFiles
+          .filter(file => !file.isFolder)
+          .map(file => file.path.substring(dropboxPath.length).replace(/^[\/\\]/, ''))
+      );
+
+      let uploadCount = 0;
+      let deleteCount = 0;
+
+      // Upload files that exist in ramdisk
+      const uploadResult = await this.dropboxClient.uploadFolderRecursive(ramdiskPath, dropboxPath);
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.error);
+      }
+      uploadCount = uploadResult.filesUploaded;
+
+      // Delete files from Dropbox that don't exist in ramdisk
+      for (const dropboxRelativePath of dropboxRelativePaths) {
+        if (!ramdiskRelativePaths.has(dropboxRelativePath)) {
+          const dropboxFilePath = `${dropboxPath}/${dropboxRelativePath}`.replace(/\\/g, '/');
+          console.log(`[DropboxStorage] Deleting from Dropbox: ${dropboxFilePath}`);
+          const deleteResult = await this.dropboxClient.deleteFile(dropboxFilePath);
+          if (deleteResult.success) {
+            deleteCount++;
+          } else {
+            console.error(`[DropboxStorage] Failed to delete ${dropboxFilePath}:`, deleteResult.error);
+          }
+        }
+      }
+
+      this.emit('sync-complete', { folderId, direction: 'push', filesCount: uploadCount + deleteCount });
+      console.log(`[DropboxStorage] Pushed to Dropbox: ${uploadCount} uploaded, ${deleteCount} deleted`);
     } catch (error) {
       this.emit('sync-error', { folderId, direction: 'push', error: error.message });
       console.error(`[DropboxStorage] Error pushing to Dropbox:`, error);
@@ -200,7 +236,7 @@ class DropboxStorage extends EventEmitter {
     await this.stopWatching(folderId);
 
     // Clean up ramdisk
-    await this.ramdiskManager.cleanup(folderId);
+    await this.ramdiskManager.cleanupRamdisk(folderId);
   }
 
   /**

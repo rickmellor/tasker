@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     initialize: (customPath) => ipcRenderer.invoke('tasks:initialize', customPath),
     getPath: () => ipcRenderer.invoke('tasks:get-path'),
     selectFolder: () => ipcRenderer.invoke('tasks:select-folder'),
+    setCurrentFolder: (folderInfo) => ipcRenderer.invoke('tasks:set-current-folder', folderInfo),
     load: (dirPath) => ipcRenderer.invoke('tasks:load', dirPath),
     create: (parentPath, text, body) => ipcRenderer.invoke('tasks:create', parentPath, text, body),
     update: (taskPath, updates) => ipcRenderer.invoke('tasks:update', taskPath, updates),

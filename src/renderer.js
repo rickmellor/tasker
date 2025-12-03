@@ -753,6 +753,14 @@ async function switchFolder(folderId) {
 
   const folder = getCurrentFolder();
   if (folder) {
+    // Tell the main process about the folder switch so it can set up DropboxStorage if needed
+    await window.electronAPI.tasks.setCurrentFolder({
+      id: folder.id,
+      path: folder.path,
+      storageType: folder.storageType || 'local',
+      dropboxPath: folder.dropboxPath || null
+    });
+
     // Initialize the folder before loading tasks
     const initResult = await window.electronAPI.tasks.initialize(folder.path);
     if (initResult.success) {
@@ -1165,6 +1173,14 @@ async function initializeTaskStorage() {
     if (state.taskFolders.length > 0 && state.currentFolderId) {
       const currentFolder = getCurrentFolder();
       if (currentFolder) {
+        // Tell the main process about the current folder so it can set up DropboxStorage if needed
+        await window.electronAPI.tasks.setCurrentFolder({
+          id: currentFolder.id,
+          path: currentFolder.path,
+          storageType: currentFolder.storageType || 'local',
+          dropboxPath: currentFolder.dropboxPath || null
+        });
+
         // Initialize the folder
         const result = await window.electronAPI.tasks.initialize(currentFolder.path);
         if (result.success) {

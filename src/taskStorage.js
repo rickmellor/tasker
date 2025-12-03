@@ -299,16 +299,30 @@ ${body}
     const deletedFolder = path.join(parentPath, '.deleted');
     await this.ensureDirectory(deletedFolder);
 
-    // Move the markdown file to .deleted folder
+    // Move the markdown file to .deleted folder (copy + delete for cross-device support)
     const deletedFilePath = path.join(deletedFolder, fileName);
-    await fs.rename(taskPath, deletedFilePath);
+    try {
+      await fs.copyFile(taskPath, deletedFilePath);
+      await fs.unlink(taskPath);
+    } catch (error) {
+      console.error('Error moving task file to .deleted:', error);
+      throw error;
+    }
 
-    // Move the directory if it exists
+    // Move the directory if it exists (copy recursively + delete)
     try {
       const deletedDirPath = path.join(deletedFolder, path.basename(taskDir));
-      await fs.rename(taskDir, deletedDirPath);
+      // Check if directory exists
+      await fs.access(taskDir);
+      // Copy recursively
+      await fs.cp(taskDir, deletedDirPath, { recursive: true });
+      // Delete original
+      await fs.rm(taskDir, { recursive: true, force: true });
     } catch (error) {
       // Directory might not exist, that's fine
+      if (error.code !== 'ENOENT') {
+        console.error('Error moving task directory to .deleted:', error);
+      }
     }
 
     // Update parent metadata
