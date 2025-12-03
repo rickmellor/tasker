@@ -779,12 +779,16 @@ function renderSidebarFolders() {
 
   elements.sidebarFolders.innerHTML = state.taskFolders.map(folder => {
     const isActive = folder.id === state.currentFolderId;
+    const isDropbox = folder.storageType === 'dropbox';
     return `
       <button class="nav-item folder-nav-item ${isActive ? 'active' : ''}"
               data-folder-id="${folder.id}"
               draggable="true">
         <span class="material-icons nav-icon">folder</span>
         <span class="nav-label">${escapeHtml(folder.name)}</span>
+        ${isDropbox ? `
+          <span class="material-icons folder-cloud-icon" title="Dropbox folder">cloud</span>
+        ` : ''}
         ${folder.versionControl ? `
           <img src="../assets/git-branch-outline.svg" alt="Git" class="folder-git-icon folder-git-icon-light" title="Version control enabled" />
           <img src="../assets/git-branch-outline-white.svg" alt="Git" class="folder-git-icon folder-git-icon-dark" title="Version control enabled" />
@@ -816,10 +820,18 @@ function renderFolderList() {
     return;
   }
 
-  elements.folderList.innerHTML = state.taskFolders.map(folder => `
+  elements.folderList.innerHTML = state.taskFolders.map(folder => {
+    const isDropbox = folder.storageType === 'dropbox';
+    const displayPath = isDropbox ? folder.dropboxPath : folder.path;
+    return `
     <div class="folder-item">
       <div class="folder-item-info">
         <div class="folder-item-name">
+          ${isDropbox ? `
+            <span class="folder-cloud-badge" title="Dropbox folder">
+              <span class="material-icons">cloud</span>
+            </span>
+          ` : ''}
           ${folder.versionControl ? `
             <span class="folder-git-badge" title="Version control enabled">
               <img src="../assets/git-branch-outline.svg" alt="Git" class="folder-git-badge-icon folder-git-badge-icon-light" />
@@ -831,14 +843,17 @@ function renderFolderList() {
                  class="folder-name-input" />
         </div>
         <div class="folder-item-path-container">
-          <input type="text" value="${escapeHtml(folder.path)}"
+          <input type="text" value="${escapeHtml(displayPath)}"
                  data-folder-id="${folder.id}"
                  class="folder-path-input"
-                 title="Click to edit path, or use Browse button"
-                 placeholder="Folder path" />
-          <button class="folder-path-browse-btn" data-folder-id="${folder.id}" title="Browse for folder">
-            <span class="material-icons">folder_open</span>
-          </button>
+                 title="${isDropbox ? 'Dropbox path (read-only)' : 'Click to edit path, or use Browse button'}"
+                 placeholder="${isDropbox ? 'Dropbox path' : 'Folder path'}"
+                 ${isDropbox ? 'readonly' : ''} />
+          ${!isDropbox ? `
+            <button class="folder-path-browse-btn" data-folder-id="${folder.id}" title="Browse for folder">
+              <span class="material-icons">folder_open</span>
+            </button>
+          ` : ''}
         </div>
       </div>
       <div class="folder-item-actions">
@@ -848,7 +863,8 @@ function renderFolderList() {
         </button>
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   // Add event listeners for rename inputs
   elements.folderList.querySelectorAll('.folder-name-input').forEach(input => {
