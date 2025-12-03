@@ -84,5 +84,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Folders
   folders: {
     permanentlyDelete: (folderPath) => ipcRenderer.invoke('folders:permanently-delete', folderPath)
+  },
+
+  // Dropbox
+  dropbox: {
+    setToken: (accessToken) => ipcRenderer.invoke('dropbox:set-token', accessToken),
+    validate: () => ipcRenderer.invoke('dropbox:validate'),
+    listFolder: (folderPath) => ipcRenderer.invoke('dropbox:list-folder', folderPath),
+    createFolder: (folderPath) => ipcRenderer.invoke('dropbox:create-folder', folderPath),
+    downloadFile: (dropboxPath) => ipcRenderer.invoke('dropbox:download-file', dropboxPath),
+    uploadFile: (dropboxPath, content) => ipcRenderer.invoke('dropbox:upload-file', dropboxPath, content),
+    syncPull: (folderId, dropboxPath) => ipcRenderer.invoke('dropbox:sync-pull', folderId, dropboxPath),
+    syncPush: (folderId, dropboxPath) => ipcRenderer.invoke('dropbox:sync-push', folderId, dropboxPath),
+    getRamdiskPath: (folderId) => ipcRenderer.invoke('dropbox:get-ramdisk-path', folderId),
+    delete: (dropboxPath) => ipcRenderer.invoke('dropbox:delete', dropboxPath),
+    move: (fromPath, toPath) => ipcRenderer.invoke('dropbox:move', fromPath, toPath)
   }
 });

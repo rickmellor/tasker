@@ -26,6 +26,9 @@ const state = {
   ollamaAvailable: false, // Whether ollama is detected and working
   gitPath: null, // Path to git executable
   gitAvailable: false, // Whether git is detected and working
+  dropboxAccessToken: null, // Dropbox access token
+  dropboxConnected: false, // Whether connected to Dropbox
+  dropboxUserInfo: null, // Dropbox user info (name, email, accountId)
   agentQuickPrompts: [ // Quick prompts for AI agent
     { id: 1, label: 'High Priority Tasks', prompt: 'Show my 3 highest priority tasks' },
     { id: 2, label: 'Due in 3 Days', prompt: 'Show the work due in the next 3 days' },
@@ -132,6 +135,28 @@ const elements = {
   gitStatus: document.getElementById('git-status'),
   gitStatusIcon: document.getElementById('git-status-icon'),
   gitStatusText: document.getElementById('git-status-text'),
+
+  // Dropbox
+  dropboxTokenInput: document.getElementById('dropbox-token-input'),
+  testDropboxBtn: document.getElementById('test-dropbox-btn'),
+  dropboxStatus: document.getElementById('dropbox-status'),
+  dropboxStatusIcon: document.getElementById('dropbox-status-icon'),
+  dropboxStatusText: document.getElementById('dropbox-status-text'),
+  dropboxUserInfo: document.getElementById('dropbox-user-info'),
+  dropboxUserName: document.getElementById('dropbox-user-name'),
+  dropboxUserEmail: document.getElementById('dropbox-user-email'),
+  disconnectDropboxBtn: document.getElementById('disconnect-dropbox-btn'),
+
+  // Dropbox Browser Modal
+  dropboxBrowserModal: document.getElementById('dropbox-browser-modal'),
+  dropboxCurrentPath: document.getElementById('dropbox-current-path'),
+  dropboxFolderList: document.getElementById('dropbox-folder-list'),
+  dropboxUpBtn: document.getElementById('dropbox-up-btn'),
+  dropboxRefreshBtn: document.getElementById('dropbox-refresh-btn'),
+  dropboxNewFolderInput: document.getElementById('dropbox-new-folder-input'),
+  dropboxCreateFolderBtn: document.getElementById('dropbox-create-folder-btn'),
+  dropboxBrowserCancelBtn: document.getElementById('dropbox-browser-cancel-btn'),
+  dropboxBrowserSelectBtn: document.getElementById('dropbox-browser-select-btn'),
 
   // Help
   helpGlobalHotkey: document.getElementById('help-global-hotkey'),
@@ -406,10 +431,14 @@ async function saveAllSettings() {
       ollamaAvailable: state.ollamaAvailable,
       gitPath: state.gitPath,
       gitAvailable: state.gitAvailable,
+      dropboxAccessToken: state.dropboxAccessToken,
+      dropboxConnected: state.dropboxConnected,
+      dropboxUserInfo: state.dropboxUserInfo,
       agentQuickPrompts: state.agentQuickPrompts,
       taskStatuses: state.taskStatuses,
       timelineZoom: state.timelineZoom,
-      taskViewMode: state.taskViewMode
+      taskViewMode: state.taskViewMode,
+      agentHeight: state.agentHeight
     });
   } finally {
     hideSavingIndicator();
@@ -3709,6 +3738,150 @@ async function loadGitSettings() {
 }
 
 // ========================================
+// Dropbox Integration
+// ========================================
+function updateDropboxStatus(icon, text, type = 'info') {
+  if (elements.dropboxStatusIcon) {
+    elements.dropboxStatusIcon.textContent = icon;
+  }
+  if (elements.dropboxStatusText) {
+    elements.dropboxStatusText.textContent = text;
+  }
+  if (elements.dropboxStatus) {
+    // Update color based on type
+    if (type === 'success') {
+      elements.dropboxStatus.style.color = 'var(--success)';
+    } else if (type === 'error') {
+      elements.dropboxStatus.style.color = 'var(--danger)';
+    } else {
+      elements.dropboxStatus.style.color = 'var(--text-secondary)';
+    }
+  }
+}
+
+async function testDropboxConnection() {
+  const token = elements.dropboxTokenInput?.value?.trim();
+
+  if (!token) {
+    alert('Please enter a Dropbox access token');
+    return;
+  }
+
+  try {
+    // Show status
+    if (elements.dropboxStatus) {
+      elements.dropboxStatus.style.display = 'block';
+    }
+    if (elements.dropboxUserInfo) {
+      elements.dropboxUserInfo.style.display = 'none';
+    }
+    updateDropboxStatus('⏳', 'Testing connection...', 'info');
+
+    // Set the token
+    await window.electronAPI.dropbox.setToken(token);
+
+    // Validate the connection
+    const result = await window.electronAPI.dropbox.validate();
+
+    if (result.success && result.userInfo) {
+      state.dropboxAccessToken = token;
+      state.dropboxConnected = true;
+      state.dropboxUserInfo = result.userInfo;
+
+      // Update UI
+      updateDropboxStatus('✓', 'Connected to Dropbox', 'success');
+
+      if (elements.dropboxUserName) {
+        elements.dropboxUserName.textContent = result.userInfo.name;
+      }
+      if (elements.dropboxUserEmail) {
+        elements.dropboxUserEmail.textContent = result.userInfo.email;
+      }
+      if (elements.dropboxUserInfo) {
+        elements.dropboxUserInfo.style.display = 'block';
+      }
+
+      // Save settings
+      await saveAllSettings();
+
+      console.log('Dropbox connected successfully:', result.userInfo);
+    } else {
+      state.dropboxAccessToken = null;
+      state.dropboxConnected = false;
+      state.dropboxUserInfo = null;
+
+      updateDropboxStatus('✗', result.error || 'Connection failed', 'error');
+    }
+  } catch (error) {
+    console.error('Error testing Dropbox connection:', error);
+    updateDropboxStatus('✗', 'Connection failed', 'error');
+  }
+}
+
+async function disconnectDropbox() {
+  if (!confirm('Are you sure you want to disconnect from Dropbox? Any Dropbox-based task folders will become inaccessible until you reconnect.')) {
+    return;
+  }
+
+  // Clear state
+  state.dropboxAccessToken = null;
+  state.dropboxConnected = false;
+  state.dropboxUserInfo = null;
+
+  // Clear UI
+  if (elements.dropboxTokenInput) {
+    elements.dropboxTokenInput.value = '';
+  }
+  if (elements.dropboxStatus) {
+    elements.dropboxStatus.style.display = 'none';
+  }
+  if (elements.dropboxUserInfo) {
+    elements.dropboxUserInfo.style.display = 'none';
+  }
+
+  // Save settings
+  await saveAllSettings();
+
+  console.log('Dropbox disconnected');
+}
+
+async function loadDropboxSettings() {
+  const result = await window.electronAPI.config.read();
+
+  if (result.success && result.config) {
+    state.dropboxAccessToken = result.config.dropboxAccessToken || null;
+    state.dropboxConnected = result.config.dropboxConnected || false;
+    state.dropboxUserInfo = result.config.dropboxUserInfo || null;
+
+    // Update UI
+    if (state.dropboxAccessToken && elements.dropboxTokenInput) {
+      elements.dropboxTokenInput.value = state.dropboxAccessToken;
+
+      // Show connection status if connected
+      if (state.dropboxConnected && state.dropboxUserInfo) {
+        if (elements.dropboxStatus) {
+          elements.dropboxStatus.style.display = 'block';
+        }
+        updateDropboxStatus('✓', 'Connected to Dropbox', 'success');
+
+        if (elements.dropboxUserName) {
+          elements.dropboxUserName.textContent = state.dropboxUserInfo.name;
+        }
+        if (elements.dropboxUserEmail) {
+          elements.dropboxUserEmail.textContent = state.dropboxUserInfo.email;
+        }
+        if (elements.dropboxUserInfo) {
+          elements.dropboxUserInfo.style.display = 'block';
+        }
+
+        // Set the token in the backend
+        await window.electronAPI.dropbox.setToken(state.dropboxAccessToken);
+      }
+    }
+  }
+}
+
+// ========================================
 // Quick Prompts Management
 // ========================================
 function renderPromptsList() {
@@ -4454,6 +4627,14 @@ function setupEventListeners() {
   elements.detectGitBtn.addEventListener('click', detectGit);
   elements.browseGitBtn.addEventListener('click', browseForGit);
 
+  // Dropbox
+  if (elements.testDropboxBtn) {
+    elements.testDropboxBtn.addEventListener('click', testDropboxConnection);
+  }
+  if (elements.disconnectDropboxBtn) {
+    elements.disconnectDropboxBtn.addEventListener('click', disconnectDropbox);
+  }
+
   // Modal
   elements.modalCancelBtn.addEventListener('click', closeTaskModal);
   elements.modalSaveBtn.addEventListener('click', saveTaskModal);
@@ -4863,6 +5044,9 @@ async function init() {
 
     // Load Git settings
     await loadGitSettings();
+
+    // Load Dropbox settings
+    await loadDropboxSettings();
 
     // Initialize the application
     await initializeApp();

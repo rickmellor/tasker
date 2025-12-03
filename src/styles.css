@@ -1782,6 +1782,54 @@ body[data-theme="dark"] .folder-git-badge-icon-dark {
   display: none;
 }
 
+/* Dropbox Folder Browser */
+.dropbox-folder-list {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  max-height: 400px;
+  min-height: 200px;
+  overflow-y: auto;
+}
+
+.dropbox-folder-item {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: background 0.15s;
+  gap: 0.75rem;
+}
+
+.dropbox-folder-item:last-child {
+  border-bottom: none;
+}
+
+.dropbox-folder-item:hover {
+  background: var(--bg-hover);
+}
+
+.dropbox-folder-item.selected {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.dropbox-folder-item .material-icons {
+  color: var(--accent-primary);
+  font-size: 24px;
+}
+
+.dropbox-folder-item.selected .material-icons {
+  color: white;
+}
+
+.dropbox-folder-name {
+  flex: 1;
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+}
+
 /* Permanent delete mode for folders when Ctrl is pressed */
 .folder-item-btn.permanent-delete {
   color: #1a1a1a;

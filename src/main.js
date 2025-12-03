@@ -4,6 +4,8 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs').promises;
 const taskStorage = require('./taskStorage');
+const DropboxClient = require('./dropboxClient');
+const RamdiskManager = require('./ramdiskManager');
 
 const execAsync = promisify(exec);
 
@@ -11,6 +13,8 @@ let mainWindow;
 let currentGlobalHotkey = null;
 let tray = null;
 let isQuittingFromCtrlClick = false;
+let dropboxClient = null;
+let ramdiskManager = null;
 
 async function createWindow() {
   // Hide the menu bar
@@ -337,6 +341,10 @@ if (!gotTheLock) {
 
 // App lifecycle
 app.whenReady().then(async () => {
+  // Initialize ramdisk manager
+  ramdiskManager = new RamdiskManager();
+  await ramdiskManager.initialize();
+
   createWindow();
   createTray();
 
@@ -363,9 +371,14 @@ app.on('activate', () => {
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
   // Unregister all global shortcuts before quitting
   globalShortcut.unregisterAll();
+
+  // Clean up all ramdisks
+  if (ramdiskManager) {
+    await ramdiskManager.cleanupAll();
+  }
 });
 
 // Handle quit event
@@ -1204,6 +1217,204 @@ ipcMain.handle('git:reset', async (_event, gitPath, folderPath, commitHash) => {
     return { success: true, output: stdout.trim() };
   } catch (error) {
     console.error('Error resetting git repository:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// ========================================
+// Dropbox IPC handlers
+// ========================================
+
+// Set Dropbox access token
+ipcMain.handle('dropbox:set-token', async (_event, accessToken) => {
+  try {
+    dropboxClient = new DropboxClient(accessToken);
+    return { success: true };
+  } catch (error) {
+    console.error('Error setting Dropbox token:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Validate Dropbox connection and get user info
+ipcMain.handle('dropbox:validate', async () => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'No Dropbox token set' };
+    }
+
+    const result = await dropboxClient.validateToken();
+    return result;
+  } catch (error) {
+    console.error('Error validating Dropbox token:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// List Dropbox folder contents
+ipcMain.handle('dropbox:list-folder', async (_event, folderPath) => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'Not connected to Dropbox' };
+    }
+
+    const result = await dropboxClient.listFolder(folderPath);
+    return result;
+  } catch (error) {
+    console.error('Error listing Dropbox folder:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Create Dropbox folder
+ipcMain.handle('dropbox:create-folder', async (_event, folderPath) => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'Not connected to Dropbox' };
+    }
+
+    const result = await dropboxClient.createFolder(folderPath);
+    return result;
+  } catch (error) {
+    console.error('Error creating Dropbox folder:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Download file from Dropbox
+ipcMain.handle('dropbox:download-file', async (_event, dropboxPath) => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'Not connected to Dropbox' };
+    }
+
+    const result = await dropboxClient.downloadFile(dropboxPath);
+    return result;
+  } catch (error) {
+    console.error('Error downloading from Dropbox:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Upload file to Dropbox
+ipcMain.handle('dropbox:upload-file', async (_event, dropboxPath, content) => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'Not connected to Dropbox' };
+    }
+
+    const result = await dropboxClient.uploadFile(dropboxPath, content);
+    return result;
+  } catch (error) {
+    console.error('Error uploading to Dropbox:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Download entire folder from Dropbox to ramdisk
+ipcMain.handle('dropbox:sync-pull', async (_event, folderId, dropboxPath) => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'Not connected to Dropbox' };
+    }
+
+    if (!ramdiskManager) {
+      return { success: false, error: 'Ramdisk manager not initialized' };
+    }
+
+    // Create ramdisk for this folder
+    const ramdiskResult = await ramdiskManager.createRamdisk(folderId);
+    if (!ramdiskResult.success) {
+      return ramdiskResult;
+    }
+
+    // Download all files from Dropbox to ramdisk
+    const syncResult = await dropboxClient.downloadFolderRecursive(dropboxPath, ramdiskResult.path);
+    if (!syncResult.success) {
+      return syncResult;
+    }
+
+    return {
+      success: true,
+      ramdiskPath: ramdiskResult.path,
+      filesDownloaded: syncResult.filesDownloaded
+    };
+  } catch (error) {
+    console.error('Error syncing from Dropbox:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Upload entire folder from ramdisk to Dropbox
+ipcMain.handle('dropbox:sync-push', async (_event, folderId, dropboxPath) => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'Not connected to Dropbox' };
+    }
+
+    if (!ramdiskManager) {
+      return { success: false, error: 'Ramdisk manager not initialized' };
+    }
+
+    const ramdiskPath = ramdiskManager.getRamdiskPath(folderId);
+    if (!ramdiskPath) {
+      return { success: false, error: 'Ramdisk not found for folder' };
+    }
+
+    // Upload all files from ramdisk to Dropbox
+    const syncResult = await dropboxClient.uploadFolderRecursive(ramdiskPath, dropboxPath);
+    return syncResult;
+  } catch (error) {
+    console.error('Error syncing to Dropbox:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get ramdisk path for a folder
+ipcMain.handle('dropbox:get-ramdisk-path', async (_event, folderId) => {
+  try {
+    if (!ramdiskManager) {
+      return { success: false, error: 'Ramdisk manager not initialized' };
+    }
+
+    const ramdiskPath = ramdiskManager.getRamdiskPath(folderId);
+    if (!ramdiskPath) {
+      return { success: false, error: 'Ramdisk not found for folder' };
+    }
+
+    return { success: true, path: ramdiskPath };
+  } catch (error) {
+    console.error('Error getting ramdisk path:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Delete Dropbox file or folder
+ipcMain.handle('dropbox:delete', async (_event, dropboxPath) => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'Not connected to Dropbox' };
+    }
+
+    const result = await dropboxClient.deleteFile(dropboxPath);
+    return result;
+  } catch (error) {
+    console.error('Error deleting from Dropbox:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Move/rename file or folder in Dropbox
+ipcMain.handle('dropbox:move', async (_event, fromPath, toPath) => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'Not connected to Dropbox' };
+    }
+
+    const result = await dropboxClient.moveFile(fromPath, toPath);
+    return result;
+  } catch (error) {
+    console.error('Error moving in Dropbox:', error);
     return { success: false, error: error.message };
   }
 });

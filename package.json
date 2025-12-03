@@ -19,6 +19,10 @@
   ],
   "author": "",
   "license": "MIT",
+  "dependencies": {
+    "dropbox": "^10.34.0",
+    "chokidar": "^3.5.3"
+  },
   "devDependencies": {
     "electron": "^39.2.2",
     "electron-builder": "^24.9.1"

@@ -788,6 +788,46 @@
               </div>
 
               <div class="settings-section">
+                <h3>Dropbox Integration</h3>
+
+                <div class="setting-item">
+                  <label for="dropbox-token-input">Access Token</label>
+                  <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <input type="password" id="dropbox-token-input" class="input-lg" placeholder="Enter your Dropbox access token..." style="flex: 1;" />
+                    <button id="test-dropbox-btn" class="btn-secondary" style="white-space: nowrap;">Test Connection</button>
+                  </div>
+                  <p class="setting-description">
+                    Enter your Dropbox access token to enable cloud storage for task folders.
+                    <a href="https://www.dropbox.com/developers/apps" target="_blank" style="color: var(--accent-primary); text-decoration: none;">Create an app</a> to get an access token.
+                  </p>
+                </div>
+
+                <div class="setting-item">
+                  <div id="dropbox-status" style="display: none;">
+                    <p style="color: var(--text-secondary); font-size: 0.9rem; margin: 0;">
+                      <span id="dropbox-status-icon" style="margin-right: 0.5rem;">⏳</span>
+                      <span id="dropbox-status-text">Testing connection...</span>
+                    </p>
+                    <div id="dropbox-user-info" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px; border: 1px solid var(--border-color);">
+                      <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <span class="material-icons" style="color: var(--accent-primary); font-size: 20px;">cloud</span>
+                        <strong style="color: var(--text-primary);">Connected to Dropbox</strong>
+                      </div>
+                      <p style="margin: 0.25rem 0; font-size: 0.85rem; color: var(--text-secondary);">
+                        <strong>Name:</strong> <span id="dropbox-user-name"></span>
+                      </p>
+                      <p style="margin: 0.25rem 0; font-size: 0.85rem; color: var(--text-secondary);">
+                        <strong>Email:</strong> <span id="dropbox-user-email"></span>
+                      </p>
+                      <button id="disconnect-dropbox-btn" class="btn-danger" style="margin-top: 0.75rem; font-size: 0.85rem; padding: 0.4rem 0.75rem;">
+                        Disconnect
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-section">
                 <h3>Task Statuses</h3>
 
                 <div class="setting-item">
@@ -981,6 +1021,51 @@
         <div class="modal-footer">
           <button id="commit-cancel-btn" class="btn-secondary">Cancel</button>
           <button id="commit-rollback-btn" class="btn-primary" style="background: var(--danger); border-color: var(--danger);">Rollback to This Commit</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dropbox Folder Browser Modal -->
+    <div id="dropbox-browser-modal" class="modal">
+      <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+          <h2>Browse Dropbox</h2>
+        </div>
+
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Current Path</label>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <input type="text" id="dropbox-current-path" class="input-lg" value="/" readonly style="flex: 1;" />
+              <button id="dropbox-up-btn" class="icon-btn" title="Go up one level">
+                <span class="material-icons">arrow_upward</span>
+              </button>
+              <button id="dropbox-refresh-btn" class="icon-btn" title="Refresh">
+                <span class="material-icons">refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Folders</label>
+            <div id="dropbox-folder-list" class="dropbox-folder-list">
+              <p style="text-align: center; padding: 2rem; color: var(--text-secondary);">Loading...</p>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>New Folder (Optional)</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="dropbox-new-folder-input" class="input-lg" placeholder="Enter folder name..." style="flex: 1;" />
+              <button id="dropbox-create-folder-btn" class="btn-secondary">Create</button>
+            </div>
+            <p class="setting-description">Create a new folder in the current location</p>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="dropbox-browser-cancel-btn" class="btn-secondary">Cancel</button>
+          <button id="dropbox-browser-select-btn" class="btn-primary">Select Current Folder</button>
         </div>
       </div>
     </div>

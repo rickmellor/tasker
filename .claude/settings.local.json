@@ -23,7 +23,8 @@
       "Bash(cmd.exe /c reg query \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v Tasker)",
       "Bash(cmd.exe /c reg query \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\")",
       "Bash(cmd.exe /c reg delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v electron.app.Electron /f)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(npm install:*)"
     ],
     "deny": [],
     "ask": []
