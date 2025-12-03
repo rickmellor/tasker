@@ -3881,6 +3881,174 @@ async function loadDropboxSettings() {
   }
 }
 
+// Dropbox folder browser state
+const dropboxBrowser = {
+  currentPath: '/',
+  selectedPath: null,
+  onSelectCallback: null
+};
+
+async function openDropboxBrowser(onSelect) {
+  if (!state.dropboxConnected) {
+    alert('Please connect to Dropbox in Settings first.');
+    return;
+  }
+
+  dropboxBrowser.currentPath = '/';
+  dropboxBrowser.selectedPath = null;
+  dropboxBrowser.onSelectCallback = onSelect;
+
+  if (elements.dropboxBrowserModal) {
+    elements.dropboxBrowserModal.classList.add('active');
+  }
+
+  await loadDropboxFolder(dropboxBrowser.currentPath);
+}
+
+function closeDropboxBrowser() {
+  if (elements.dropboxBrowserModal) {
+    elements.dropboxBrowserModal.classList.remove('active');
+  }
+  if (elements.dropboxNewFolderInput) {
+    elements.dropboxNewFolderInput.value = '';
+  }
+  dropboxBrowser.onSelectCallback = null;
+}
+
+async function loadDropboxFolder(path) {
+  if (!elements.dropboxFolderList) return;
+
+  try {
+    // Update current path display
+    if (elements.dropboxCurrentPath) {
+      elements.dropboxCurrentPath.value = path || '/';
+    }
+
+    // Show loading
+    elements.dropboxFolderList.innerHTML = '<p style="text-align: center; padding: 2rem; color: var(--text-secondary);">Loading...</p>';
+
+    // List folder contents
+    const result = await window.electronAPI.dropbox.listFolder(path);
+
+    if (!result.success) {
+      elements.dropboxFolderList.innerHTML = `<p style="text-align: center; padding: 2rem; color: var(--danger);">Error: ${result.error}</p>`;
+      return;
+    }
+
+    // Filter to only show folders
+    const folders = result.entries.filter(e => e.isFolder);
+
+    if (folders.length === 0) {
+      elements.dropboxFolderList.innerHTML = '<p style="text-align: center; padding: 2rem; color: var(--text-secondary);">No folders found. Create one below or select current folder.</p>';
+      return;
+    }
+
+    // Render folders
+    elements.dropboxFolderList.innerHTML = folders.map(folder => `
+      <div class="dropbox-folder-item" data-path="${escapeHtml(folder.path)}">
+        <span class="material-icons">folder</span>
+        <span class="dropbox-folder-name">${escapeHtml(folder.name)}</span>
+      </div>
+    `).join('');
+
+    // Add click handlers
+    elements.dropboxFolderList.querySelectorAll('.dropbox-folder-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const folderPath = item.dataset.path;
+
+        // Toggle selection
+        const wasSelected = item.classList.contains('selected');
+
+        // Remove selection from all items
+        elements.dropboxFolderList.querySelectorAll('.dropbox-folder-item').forEach(i => {
+          i.classList.remove('selected');
+        });
+
+        if (!wasSelected) {
+          item.classList.add('selected');
+          dropboxBrowser.selectedPath = folderPath;
+        } else {
+          dropboxBrowser.selectedPath = null;
+        }
+      });
+
+      // Double-click to navigate into folder
+      item.addEventListener('dblclick', () => {
+        const folderPath = item.dataset.path;
+        dropboxBrowser.currentPath = folderPath;
+        dropboxBrowser.selectedPath = null;
+        loadDropboxFolder(folderPath);
+      });
+    });
+  } catch (error) {
+    console.error('Error loading Dropbox folder:', error);
+    elements.dropboxFolderList.innerHTML = `<p style="text-align: center; padding: 2rem; color: var(--danger);">Error loading folder</p>`;
+  }
+}
+
+async function navigateDropboxUp() {
+  if (dropboxBrowser.currentPath === '/' || dropboxBrowser.currentPath === '') {
+    return; // Already at root
+  }
+
+  // Go up one level
+  const parts = dropboxBrowser.currentPath.split('/').filter(p => p);
+  parts.pop();
+  const newPath = parts.length > 0 ? '/' + parts.join('/') : '/';
+
+  dropboxBrowser.currentPath = newPath;
+  dropboxBrowser.selectedPath = null;
+  await loadDropboxFolder(newPath);
+}
+
+async function refreshDropboxFolder() {
+  dropboxBrowser.selectedPath = null;
+  await loadDropboxFolder(dropboxBrowser.currentPath);
+}
+
+async function createDropboxFolder() {
+  const folderName = elements.dropboxNewFolderInput?.value?.trim();
+
+  if (!folderName) {
+    alert('Please enter a folder name');
+    return;
+  }
+
+  try {
+    const newFolderPath = dropboxBrowser.currentPath === '/'
+      ? `/${folderName}`
+      : `${dropboxBrowser.currentPath}/${folderName}`;
+
+    const result = await window.electronAPI.dropbox.createFolder(newFolderPath);
+
+    if (result.success) {
+      // Clear input
+      if (elements.dropboxNewFolderInput) {
+        elements.dropboxNewFolderInput.value = '';
+      }
+
+      // Refresh the folder list
+      await refreshDropboxFolder();
+    } else {
+      alert(`Failed to create folder: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('Error creating Dropbox folder:', error);
+    alert('Failed to create folder');
+  }
+}
+
+function selectDropboxFolder() {
+  // Use selected folder if one is highlighted, otherwise use current path
+  const selectedPath = dropboxBrowser.selectedPath || dropboxBrowser.currentPath;
+
+  if (dropboxBrowser.onSelectCallback) {
+    dropboxBrowser.onSelectCallback(selectedPath);
+  }
+
+  closeDropboxBrowser();
+}
+
 // ========================================
 // Quick Prompts Management
 // ========================================
@@ -4633,6 +4801,41 @@ function setupEventListeners() {
   }
   if (elements.disconnectDropboxBtn) {
     elements.disconnectDropboxBtn.addEventListener('click', disconnectDropbox);
+  }
+
+  // Dropbox Browser
+  if (elements.dropboxUpBtn) {
+    elements.dropboxUpBtn.addEventListener('click', navigateDropboxUp);
+  }
+  if (elements.dropboxRefreshBtn) {
+    elements.dropboxRefreshBtn.addEventListener('click', refreshDropboxFolder);
+  }
+  if (elements.dropboxCreateFolderBtn) {
+    elements.dropboxCreateFolderBtn.addEventListener('click', createDropboxFolder);
+  }
+  if (elements.dropboxBrowserCancelBtn) {
+    elements.dropboxBrowserCancelBtn.addEventListener('click', closeDropboxBrowser);
+  }
+  if (elements.dropboxBrowserSelectBtn) {
+    elements.dropboxBrowserSelectBtn.addEventListener('click', selectDropboxFolder);
+  }
+
+  // Close Dropbox browser when clicking outside
+  if (elements.dropboxBrowserModal) {
+    elements.dropboxBrowserModal.addEventListener('click', (e) => {
+      if (e.target === elements.dropboxBrowserModal) {
+        closeDropboxBrowser();
+      }
+    });
+  }
+
+  // Enter key in new folder input
+  if (elements.dropboxNewFolderInput) {
+    elements.dropboxNewFolderInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        createDropboxFolder();
+      }
+    });
   }
 
   // Modal
