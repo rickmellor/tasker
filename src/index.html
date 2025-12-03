@@ -887,6 +887,23 @@
 
         <div class="modal-body">
           <div class="form-group">
+            <label>Storage Type</label>
+            <div style="display: flex; gap: 1.5rem; margin-bottom: 0.5rem;">
+              <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="radio" name="storage-type" value="local" id="storage-type-local" checked style="width: auto; margin-right: 0.5rem;" />
+                <span class="material-icons" style="margin-right: 0.25rem; font-size: 20px;">folder</span>
+                Local Disk
+              </label>
+              <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="radio" name="storage-type" value="dropbox" id="storage-type-dropbox" style="width: auto; margin-right: 0.5rem;" />
+                <span class="material-icons" style="margin-right: 0.25rem; font-size: 20px;">cloud</span>
+                Dropbox
+              </label>
+            </div>
+            <p class="setting-description">Choose where to store your task files</p>
+          </div>
+
+          <div class="form-group" id="local-folder-section">
             <label for="folder-path-input">Folder Path</label>
             <div style="display: flex; gap: 0.5rem;">
               <input type="text" id="folder-path-input" class="input-lg" placeholder="Paste or browse for a folder path..." style="flex: 1;" />
@@ -894,7 +911,18 @@
                 <span class="material-icons">folder_open</span>
               </button>
             </div>
-            <p class="setting-description">Enter the full path to a folder where tasks will be stored</p>
+            <p class="setting-description">Enter the full path to a local folder where tasks will be stored</p>
+          </div>
+
+          <div class="form-group" id="dropbox-folder-section" style="display: none;">
+            <label for="dropbox-path-input">Dropbox Path</label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="dropbox-path-input" class="input-lg" placeholder="Select a Dropbox folder..." readonly style="flex: 1;" />
+              <button id="browse-dropbox-btn" class="icon-btn" title="Browse Dropbox">
+                <span class="material-icons">cloud</span>
+              </button>
+            </div>
+            <p class="setting-description">Select a folder in your Dropbox where tasks will be stored</p>
           </div>
 
           <div class="form-group">

@@ -291,6 +291,43 @@ class RamdiskManager {
 
     return size;
   }
+
+  /**
+   * List all files in a directory recursively
+   * @param {string} dirPath - Directory path
+   * @returns {Promise<string[]>} - Array of file paths
+   */
+  async listFiles(dirPath) {
+    const files = [];
+
+    try {
+      // Check if directory exists
+      try {
+        await fs.access(dirPath);
+      } catch {
+        return files; // Directory doesn't exist, return empty array
+      }
+
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const entryPath = path.join(dirPath, entry.name);
+
+        if (entry.isDirectory()) {
+          // Recursively list files in subdirectories
+          const subFiles = await this.listFiles(entryPath);
+          files.push(...subFiles);
+        } else {
+          // Add file to list
+          files.push(entryPath);
+        }
+      }
+    } catch (error) {
+      console.error('List files error:', error);
+    }
+
+    return files;
+  }
 }
 
 module.exports = RamdiskManager;

@@ -343,6 +343,57 @@ class DropboxClient {
       };
     }
   }
+
+  /**
+   * List folder contents recursively
+   * @param {string} folderPath - Path in Dropbox (empty string for root)
+   * @returns {Promise<Array>} - Array of all entries (files and folders)
+   */
+  async listFolderRecursive(folderPath = '') {
+    if (!this.dbx) {
+      throw new Error('No access token set');
+    }
+
+    const allEntries = [];
+
+    try {
+      // Start with initial folder listing
+      let response = await this.dbx.filesListFolder({
+        path: folderPath || '',
+        recursive: true, // Get all nested contents
+        include_deleted: false
+      });
+
+      // Add entries from first response
+      allEntries.push(...response.result.entries.map(entry => ({
+        path: entry.path_lower,
+        name: entry.name,
+        isFolder: entry['.tag'] === 'folder',
+        size: entry.size || 0,
+        modified: entry.server_modified || null
+      })));
+
+      // Handle pagination if there are more results
+      while (response.result.has_more) {
+        response = await this.dbx.filesListFolderContinue({
+          cursor: response.result.cursor
+        });
+
+        allEntries.push(...response.result.entries.map(entry => ({
+          path: entry.path_lower,
+          name: entry.name,
+          isFolder: entry['.tag'] === 'folder',
+          size: entry.size || 0,
+          modified: entry.server_modified || null
+        })));
+      }
+
+      return allEntries;
+    } catch (error) {
+      console.error('Dropbox recursive list error:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = DropboxClient;

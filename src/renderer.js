@@ -99,9 +99,15 @@ const elements = {
 
   // Add Folder Modal
   addFolderModal: document.getElementById('add-folder-modal'),
+  storageTypeLocal: document.getElementById('storage-type-local'),
+  storageTypeDropbox: document.getElementById('storage-type-dropbox'),
+  localFolderSection: document.getElementById('local-folder-section'),
+  dropboxFolderSection: document.getElementById('dropbox-folder-section'),
   folderPathInput: document.getElementById('folder-path-input'),
+  dropboxPathInput: document.getElementById('dropbox-path-input'),
   folderNameInput: document.getElementById('folder-name-input'),
   browseFolderBtn: document.getElementById('browse-folder-btn'),
+  browseDropboxBtn: document.getElementById('browse-dropbox-btn'),
   addFolderCancelBtn: document.getElementById('add-folder-cancel-btn'),
   addFolderSaveBtn: document.getElementById('add-folder-save-btn'),
   enableVersionControlCheckbox: document.getElementById('enable-version-control'),
@@ -451,8 +457,16 @@ function getCurrentFolder() {
 }
 
 function openAddFolderModal() {
+  // Reset inputs
   elements.folderPathInput.value = '';
+  elements.dropboxPathInput.value = '';
   elements.folderNameInput.value = '';
+
+  // Reset to local storage type
+  if (elements.storageTypeLocal) {
+    elements.storageTypeLocal.checked = true;
+  }
+  updateStorageTypeVisibility();
 
   // Enable/disable version control checkbox based on git availability
   if (state.gitPath && state.gitAvailable) {
@@ -464,8 +478,32 @@ function openAddFolderModal() {
     elements.enableVersionControlCheckbox.parentElement.title = 'Git must be configured in Settings to enable version control';
   }
 
+  // Disable Dropbox option if not connected
+  if (elements.storageTypeDropbox) {
+    if (!state.dropboxConnected) {
+      elements.storageTypeDropbox.disabled = true;
+      elements.storageTypeDropbox.parentElement.title = 'Connect to Dropbox in Settings first';
+      elements.storageTypeDropbox.parentElement.style.opacity = '0.5';
+    } else {
+      elements.storageTypeDropbox.disabled = false;
+      elements.storageTypeDropbox.parentElement.title = '';
+      elements.storageTypeDropbox.parentElement.style.opacity = '1';
+    }
+  }
+
   elements.addFolderModal.classList.add('active');
   elements.folderPathInput.focus();
+}
+
+function updateStorageTypeVisibility() {
+  const isLocal = elements.storageTypeLocal?.checked;
+
+  if (elements.localFolderSection) {
+    elements.localFolderSection.style.display = isLocal ? 'block' : 'none';
+  }
+  if (elements.dropboxFolderSection) {
+    elements.dropboxFolderSection.style.display = isLocal ? 'none' : 'block';
+  }
 }
 
 function closeAddFolderModal() {
@@ -494,57 +532,115 @@ async function browseFolderForModal() {
 }
 
 async function saveAddFolder() {
-  const folderPath = elements.folderPathInput.value.trim();
+  // Determine storage type
+  const isLocal = elements.storageTypeLocal?.checked;
+  const storageType = isLocal ? 'local' : 'dropbox';
 
-  if (!folderPath) {
-    alert('Please enter or browse for a folder path.');
-    return;
+  // Get appropriate path based on storage type
+  let folderPath;
+  let dropboxPath;
+
+  if (storageType === 'local') {
+    folderPath = elements.folderPathInput.value.trim();
+    if (!folderPath) {
+      alert('Please enter or browse for a folder path.');
+      return;
+    }
+  } else {
+    dropboxPath = elements.dropboxPathInput.value.trim();
+    if (!dropboxPath) {
+      alert('Please select a Dropbox folder.');
+      return;
+    }
   }
 
   try {
-    // Initialize the folder
-    const result = await window.electronAPI.tasks.initialize(folderPath);
+    let actualPath;
+    const folderId = Date.now().toString();
 
-    if (result.success) {
-      // Use custom name or extract from path
-      let folderName = elements.folderNameInput.value.trim();
-      if (!folderName) {
-        const pathParts = result.path.split(/[/\\]/);
+    if (storageType === 'local') {
+      // Initialize the local folder
+      const result = await window.electronAPI.tasks.initialize(folderPath);
+
+      if (!result.success) {
+        alert('Failed to initialize folder: ' + result.error);
+        return;
+      }
+
+      actualPath = result.path;
+    } else {
+      // Dropbox: Pull contents to ramdisk
+      const syncResult = await window.electronAPI.dropbox.syncPull(folderId, dropboxPath);
+
+      if (!syncResult.success) {
+        alert('Failed to sync from Dropbox: ' + syncResult.error);
+        return;
+      }
+
+      // Get the ramdisk path
+      const ramdiskResult = await window.electronAPI.dropbox.getRamdiskPath(folderId);
+      if (!ramdiskResult.success) {
+        alert('Failed to get ramdisk path: ' + ramdiskResult.error);
+        return;
+      }
+
+      actualPath = ramdiskResult.path;
+
+      // Initialize the ramdisk folder for task operations
+      const initResult = await window.electronAPI.tasks.initialize(actualPath);
+      if (!initResult.success) {
+        alert('Failed to initialize ramdisk folder: ' + initResult.error);
+        return;
+      }
+    }
+
+    // Use custom name or extract from path
+    let folderName = elements.folderNameInput.value.trim();
+    if (!folderName) {
+      if (storageType === 'local') {
+        const pathParts = actualPath.split(/[/\\]/);
+        folderName = pathParts[pathParts.length - 1] || 'Tasks';
+      } else {
+        const pathParts = dropboxPath.split('/').filter(p => p);
         folderName = pathParts[pathParts.length - 1] || 'Tasks';
       }
-
-      // Check if version control should be enabled
-      const enableVersionControl = elements.enableVersionControlCheckbox.checked;
-
-      // Initialize git if requested
-      if (enableVersionControl && state.gitPath) {
-        const gitResult = await window.electronAPI.git.init(state.gitPath, result.path);
-        if (!gitResult.success) {
-          console.error('Failed to initialize git:', gitResult.error);
-          alert('Warning: Could not initialize Git repository: ' + gitResult.error);
-        }
-      }
-
-      // Create new folder entry
-      const newFolder = {
-        id: Date.now().toString(),
-        name: folderName,
-        path: result.path,
-        versionControl: enableVersionControl && state.gitPath ? true : false
-      };
-
-      state.taskFolders.push(newFolder);
-      state.currentFolderId = newFolder.id;
-
-      saveFoldersToStorage();
-      renderSidebarFolders();
-      renderFolderList();
-      await loadTasks();
-
-      closeAddFolderModal();
-    } else {
-      alert('Failed to initialize folder: ' + result.error);
     }
+
+    // Check if version control should be enabled
+    const enableVersionControl = elements.enableVersionControlCheckbox.checked;
+
+    // Initialize git if requested
+    if (enableVersionControl && state.gitPath) {
+      const gitResult = await window.electronAPI.git.init(state.gitPath, actualPath);
+      if (!gitResult.success) {
+        console.error('Failed to initialize git:', gitResult.error);
+        alert('Warning: Could not initialize Git repository: ' + gitResult.error);
+      }
+    }
+
+    // Create new folder entry
+    const newFolder = {
+      id: folderId,
+      name: folderName,
+      path: actualPath,
+      storageType: storageType,
+      versionControl: enableVersionControl && state.gitPath ? true : false
+    };
+
+    // Add dropboxPath for Dropbox folders
+    if (storageType === 'dropbox') {
+      newFolder.dropboxPath = dropboxPath;
+    }
+
+    state.taskFolders.push(newFolder);
+    state.currentFolderId = newFolder.id;
+
+    saveFoldersToStorage();
+    renderSidebarFolders();
+    renderFolderList();
+    await loadTasks();
+
+    closeAddFolderModal();
   } catch (error) {
     console.error('Error adding folder:', error);
     alert('Error adding folder: ' + error.message);
@@ -1119,6 +1215,18 @@ async function processGitCommitQueue() {
 
       // Reload timeline to show the new commit
       await loadTimeline();
+
+      // If this is a Dropbox folder, push to Dropbox after commit
+      if (currentFolder.storageType === 'dropbox' && currentFolder.dropboxPath) {
+        console.log('Pushing to Dropbox after git commit...');
+        try {
+          await window.electronAPI.dropbox.syncPush(currentFolder.id, currentFolder.dropboxPath);
+          console.log('Dropbox push successful');
+        } catch (dropboxError) {
+          console.error('Dropbox push failed:', dropboxError);
+          // Don't fail the git commit if Dropbox push fails
+        }
+      }
     } catch (error) {
       console.error('Error committing to git:', error);
       // Continue processing remaining commits
@@ -4753,7 +4861,28 @@ function setupEventListeners() {
   }
 
   // Add Folder Modal
+  if (elements.storageTypeLocal) {
+    elements.storageTypeLocal.addEventListener('change', updateStorageTypeVisibility);
+  }
+  if (elements.storageTypeDropbox) {
+    elements.storageTypeDropbox.addEventListener('change', updateStorageTypeVisibility);
+  }
   elements.browseFolderBtn.addEventListener('click', browseFolderForModal);
+  if (elements.browseDropboxBtn) {
+    elements.browseDropboxBtn.addEventListener('click', () => {
+      openDropboxBrowser((selectedPath) => {
+        if (elements.dropboxPathInput) {
+          elements.dropboxPathInput.value = selectedPath;
+        }
+        // Auto-generate folder name from path
+        if (!elements.folderNameInput.value.trim() && selectedPath) {
+          const pathParts = selectedPath.split('/').filter(p => p);
+          const folderName = pathParts[pathParts.length - 1] || 'Tasks';
+          elements.folderNameInput.value = folderName;
+        }
+      });
+    });
+  }
   elements.addFolderCancelBtn.addEventListener('click', closeAddFolderModal);
   elements.addFolderSaveBtn.addEventListener('click', saveAddFolder);
 
