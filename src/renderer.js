@@ -3929,6 +3929,15 @@ async function testDropboxConnection() {
       await saveAllSettings();
 
       console.log('Dropbox connected successfully:', result.userInfo);
+
+      // If Add Folder modal is open, update the Dropbox option visibility
+      if (elements.addFolderModal.classList.contains('active')) {
+        if (elements.storageTypeDropbox) {
+          elements.storageTypeDropbox.disabled = false;
+          elements.storageTypeDropbox.parentElement.title = '';
+          elements.storageTypeDropbox.parentElement.style.opacity = '1';
+        }
+      }
     } else {
       state.dropboxAccessToken = null;
       state.dropboxConnected = false;
@@ -3967,6 +3976,20 @@ async function disconnectDropbox() {
   await saveAllSettings();
 
   console.log('Dropbox disconnected');
+
+  // If Add Folder modal is open, disable the Dropbox option
+  if (elements.addFolderModal.classList.contains('active')) {
+    if (elements.storageTypeDropbox) {
+      elements.storageTypeDropbox.disabled = true;
+      elements.storageTypeDropbox.parentElement.title = 'Connect to Dropbox in Settings first';
+      elements.storageTypeDropbox.parentElement.style.opacity = '0.5';
+      // If Dropbox was selected, switch back to local
+      if (elements.storageTypeDropbox.checked) {
+        elements.storageTypeLocal.checked = true;
+        updateStorageTypeVisibility();
+      }
+    }
+  }
 }
 
 async function loadDropboxSettings() {
