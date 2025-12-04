@@ -2721,3 +2721,112 @@ body[data-theme="dark"] .kanban-column[data-status="Completed"] .kanban-column-c
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
+
+/* Move Task Modal */
+.move-task-tree {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.5rem;
+  max-height: 300px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+}
+
+.move-task-item {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+.move-task-item:hover {
+  background: var(--bg-hover);
+}
+
+.move-task-item.selected {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.move-task-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.move-task-item.disabled:hover {
+  background: transparent;
+}
+
+.move-task-expand {
+  margin-right: 0.25rem;
+  cursor: pointer;
+  user-select: none;
+  width: 20px;
+  text-align: center;
+}
+
+.move-task-text {
+  flex: 1;
+}
+
+.move-task-children {
+  margin-left: 1.5rem;
+}
+
+/* Context Menu */
+.context-menu {
+  position: fixed;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: var(--shadow-lg);
+  padding: 0.25rem 0;
+  min-width: 200px;
+  z-index: 10000;
+  display: none;
+}
+
+.context-menu.active {
+  display: block;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.625rem 1rem;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.context-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.context-menu-item .material-icons {
+  font-size: 18px;
+  color: var(--text-secondary);
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 0.25rem 0;
+}
+
+/* Folder drop highlight when dragging tasks */
+.folder-nav-item.drag-over-folder {
+  background: var(--accent-primary);
+  color: white;
+}
+
+.folder-nav-item.drag-over-folder .material-icons {
+  color: white;
+}

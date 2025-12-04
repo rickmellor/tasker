@@ -301,6 +301,10 @@
                     <span class="shortcut-description">Open Sort menu</span>
                   </div>
                   <div class="shortcut-item">
+                    <kbd>Ctrl</kbd> + <kbd>M</kbd>
+                    <span class="shortcut-description">Move selected task to another folder</span>
+                  </div>
+                  <div class="shortcut-item">
                     <kbd>↑</kbd> / <kbd>↓</kbd>
                     <span class="shortcut-description">Navigate filter/sort options (when menu open)</span>
                   </div>
@@ -418,7 +422,7 @@
                   <h4>General</h4>
                   <div class="shortcut-item">
                     <kbd>Escape</kbd>
-                    <span class="shortcut-description">Close modals and dialogs</span>
+                    <span class="shortcut-description">Close modals and dialogs, or return to tasks view from help/settings/dashboard</span>
                   </div>
                   <div class="shortcut-item">
                     <kbd>Enter</kbd>
@@ -802,6 +806,42 @@
               </div>
 
               <div class="settings-section">
+                <h3>Vector Database (Optional)</h3>
+
+                <div class="setting-item">
+                  <label style="display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" id="vector-db-enabled" />
+                    <span>Enable Vector Database</span>
+                  </label>
+                  <p class="setting-description">Use a vector database to improve AI context retrieval with semantic search and embeddings</p>
+                </div>
+
+                <div id="vector-db-config" style="display: none;">
+                  <div class="setting-item">
+                    <label for="vector-db-url">Vector Database URL</label>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                      <input type="text" id="vector-db-url" class="input-lg" placeholder="http://localhost:8000" style="flex: 1;" />
+                      <button id="test-vector-db-btn" class="btn-secondary" style="white-space: nowrap;">Test Connection</button>
+                    </div>
+                    <p class="setting-description">URL endpoint for your vector database server (e.g., Qdrant, Weaviate, Milvus)</p>
+                  </div>
+
+                  <div class="setting-item">
+                    <label for="vector-db-collection">Collection Name (Optional)</label>
+                    <input type="text" id="vector-db-collection" class="input-lg" placeholder="tasker_tasks" />
+                    <p class="setting-description">Name of the collection to store task embeddings. Default: tasker_tasks</p>
+                  </div>
+
+                  <div class="setting-item">
+                    <p id="vector-db-status" style="color: var(--text-secondary); font-size: 0.9rem; margin: 0;">
+                      <span id="vector-db-status-icon" style="margin-right: 0.5rem;">○</span>
+                      <span id="vector-db-status-text">Not configured</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="settings-section">
                 <h3>Git Integration</h3>
 
                 <div class="setting-item">
@@ -1063,9 +1103,58 @@
 
         <div class="modal-footer">
           <button id="modal-undelete-btn" class="btn-secondary" style="margin-right: auto; display: none;">Undelete</button>
+          <button id="modal-move-btn" class="btn-secondary" style="margin-right: auto;">Move...</button>
           <button id="modal-cancel-btn" class="btn-secondary">Cancel</button>
           <button id="modal-save-btn" class="btn-primary">Close</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Move Task Modal -->
+    <div id="move-task-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Move Task</h2>
+        </div>
+
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="move-folder-select">Destination Folder</label>
+            <select id="move-folder-select" class="select">
+              <!-- Populated dynamically -->
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label>Parent Task (optional)</label>
+            <p class="setting-description">Select a task to move under, or leave unselected to move to the root of the folder</p>
+            <div id="move-task-tree" class="move-task-tree">
+              <!-- Populated dynamically with task tree -->
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="move-cancel-btn" class="btn-secondary">Cancel</button>
+          <button id="move-confirm-btn" class="btn-primary">Move Task</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Task Context Menu -->
+    <div id="task-context-menu" class="context-menu">
+      <div class="context-menu-item" data-action="move">
+        <span class="material-icons">drive_file_move</span>
+        <span>Move to Folder...</span>
+      </div>
+      <div class="context-menu-item" data-action="open">
+        <span class="material-icons">open_in_new</span>
+        <span>Open Details</span>
+      </div>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-item" data-action="delete">
+        <span class="material-icons">delete</span>
+        <span>Delete</span>
       </div>
     </div>
 

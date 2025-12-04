@@ -12,6 +12,9 @@ const state = {
   draggedTask: null, // Track task being dragged
   draggedFolder: null, // Track folder being dragged
   editingTask: null, // Track task being edited in modal
+  movingTask: null, // Track task being moved to another folder
+  moveSelectedParent: null, // Track selected parent in move modal
+  contextMenuTask: null, // Track task for context menu
   timelineZoom: 1.0, // Timeline zoom level (1.0 = 100%)
   timelineCommits: [], // Current commits being displayed on timeline
   activeFilters: new Set(['all']), // Track active filters
@@ -25,6 +28,10 @@ const state = {
   ollamaPath: null, // Path to ollama executable
   ollamaModel: null, // Selected ollama model
   ollamaAvailable: false, // Whether ollama is detected and working
+  vectorDbEnabled: false, // Whether vector DB is enabled
+  vectorDbUrl: 'http://localhost:8000', // Vector DB endpoint URL
+  vectorDbCollection: 'tasker_tasks', // Collection name for embeddings
+  vectorDbConnected: false, // Whether vector DB is connected and available
   gitPath: null, // Path to git executable
   gitAvailable: false, // Whether git is detected and working
   dropboxClientId: null, // Dropbox OAuth2 Client ID
@@ -137,6 +144,16 @@ const elements = {
   ollamaStatusIcon: document.getElementById('ollama-status-icon'),
   ollamaStatusText: document.getElementById('ollama-status-text'),
 
+  // Vector DB
+  vectorDbEnabled: document.getElementById('vector-db-enabled'),
+  vectorDbConfig: document.getElementById('vector-db-config'),
+  vectorDbUrl: document.getElementById('vector-db-url'),
+  vectorDbCollection: document.getElementById('vector-db-collection'),
+  testVectorDbBtn: document.getElementById('test-vector-db-btn'),
+  vectorDbStatus: document.getElementById('vector-db-status'),
+  vectorDbStatusIcon: document.getElementById('vector-db-status-icon'),
+  vectorDbStatusText: document.getElementById('vector-db-status-text'),
+
   // Git
   gitPathInput: document.getElementById('git-path-input'),
   browseGitBtn: document.getElementById('browse-git-btn'),
@@ -186,6 +203,14 @@ const elements = {
   modalCancelBtn: document.getElementById('modal-cancel-btn'),
   modalSaveBtn: document.getElementById('modal-save-btn'),
   modalUndeleteBtn: document.getElementById('modal-undelete-btn'),
+  modalMoveBtn: document.getElementById('modal-move-btn'),
+
+  // Move Task Modal
+  moveTaskModal: document.getElementById('move-task-modal'),
+  moveFolderSelect: document.getElementById('move-folder-select'),
+  moveTaskTree: document.getElementById('move-task-tree'),
+  moveCancelBtn: document.getElementById('move-cancel-btn'),
+  moveConfirmBtn: document.getElementById('move-confirm-btn'),
 
   // Filter
   filterToggleBtn: document.getElementById('filter-toggle-btn'),
@@ -236,7 +261,10 @@ const elements = {
   commitAuthor: document.getElementById('commit-author'),
   commitDate: document.getElementById('commit-date'),
   commitCancelBtn: document.getElementById('commit-cancel-btn'),
-  commitRollbackBtn: document.getElementById('commit-rollback-btn')
+  commitRollbackBtn: document.getElementById('commit-rollback-btn'),
+
+  // Context Menu
+  taskContextMenu: document.getElementById('task-context-menu')
 };
 
 // ========================================
@@ -440,6 +468,10 @@ async function saveAllSettings() {
       ollamaPath: state.ollamaPath,
       ollamaModel: state.ollamaModel,
       ollamaAvailable: state.ollamaAvailable,
+      vectorDbEnabled: state.vectorDbEnabled,
+      vectorDbUrl: state.vectorDbUrl,
+      vectorDbCollection: state.vectorDbCollection,
+      vectorDbConnected: state.vectorDbConnected,
       gitPath: state.gitPath,
       gitAvailable: state.gitAvailable,
       dropboxClientId: state.dropboxClientId,
@@ -982,6 +1014,25 @@ function handleFolderDragOver(e) {
   e.dataTransfer.dropEffect = 'move';
 
   const targetItem = e.currentTarget;
+
+  // Handle task being dragged onto folder
+  if (state.draggedTask) {
+    // Clear previous highlights
+    document.querySelectorAll('.folder-nav-item').forEach(item => {
+      item.classList.remove('drag-over-folder');
+    });
+
+    // Don't allow dropping on current folder
+    if (targetItem.dataset.folderId === state.currentFolderId) {
+      return;
+    }
+
+    // Highlight the target folder
+    targetItem.classList.add('drag-over-folder');
+    return;
+  }
+
+  // Handle folder being dragged for reordering
   if (!state.draggedFolder) return;
 
   // Don't allow dropping on itself
@@ -1007,6 +1058,52 @@ async function handleFolderDrop(e) {
   e.preventDefault();
 
   const targetFolderId = e.currentTarget.dataset.folderId;
+
+  // Handle task being dropped onto folder
+  if (state.draggedTask) {
+    // Don't allow dropping on current folder
+    if (targetFolderId === state.currentFolderId) {
+      return;
+    }
+
+    try {
+      // Get task info before move
+      const draggedTask = findTaskByPath(state.tasks, state.draggedTask.path);
+      const taskTitle = draggedTask ? draggedTask.title : 'Unknown task';
+
+      // Move task to target folder root (no parent)
+      const result = await window.electronAPI.tasks.moveToFolder(
+        state.draggedTask.path,
+        targetFolderId,
+        null // No parent - move to root
+      );
+
+      if (result.success) {
+        await loadTasks(); // Reload tasks
+
+        // Commit to git if version control is enabled
+        const destFolder = state.taskFolders.find(f => f.id === targetFolderId);
+        await commitTaskChange(`Move task: ${taskTitle} to ${destFolder?.name || 'folder'}`);
+
+        console.log(`Task moved to ${destFolder?.name || 'folder'}`);
+      } else {
+        console.error('Failed to move task:', result.error);
+        alert('Failed to move task: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Error moving task:', error);
+      alert('Error moving task: ' + error.message);
+    }
+
+    // Clear highlights
+    document.querySelectorAll('.folder-nav-item').forEach(item => {
+      item.classList.remove('drag-over-folder');
+    });
+
+    return;
+  }
+
+  // Handle folder being dropped for reordering
   if (!state.draggedFolder || targetFolderId === state.draggedFolder) return;
 
   const rect = e.currentTarget.getBoundingClientRect();
@@ -1044,7 +1141,7 @@ function handleFolderDragEnd(e) {
   e.currentTarget.classList.remove('dragging');
 
   document.querySelectorAll('.folder-nav-item').forEach(item => {
-    item.classList.remove('drop-above', 'drop-below');
+    item.classList.remove('drop-above', 'drop-below', 'drag-over-folder');
   });
 
   state.draggedFolder = null;
@@ -2203,6 +2300,171 @@ async function saveTaskModal() {
   } catch (error) {
     console.error('Error saving task:', error);
     alert('Error saving task: ' + error.message);
+  }
+}
+
+// ========================================
+// Move Task Modal
+// ========================================
+function openMoveTaskModal(task) {
+  if (!task) return;
+
+  state.movingTask = task;
+  state.moveSelectedParent = null;
+
+  // Populate folder dropdown
+  elements.moveFolderSelect.innerHTML = state.taskFolders
+    .filter(f => !f.deleted) // Don't show deleted folder as destination
+    .map(folder => {
+      const isCurrent = folder.id === state.currentFolderId;
+      return `<option value="${folder.id}" ${isCurrent ? 'selected' : ''}>${escapeHtml(folder.name)}</option>`;
+    })
+    .join('');
+
+  // Load tasks for the selected folder
+  updateMoveTaskTree();
+
+  // Show modal
+  elements.moveTaskModal.classList.add('active');
+
+  // Handle folder selection change
+  const folderChangeHandler = () => updateMoveTaskTree();
+  elements.moveFolderSelect.removeEventListener('change', folderChangeHandler);
+  elements.moveFolderSelect.addEventListener('change', folderChangeHandler);
+}
+
+function closeMoveTaskModal() {
+  state.movingTask = null;
+  state.moveSelectedParent = null;
+  elements.moveTaskModal.classList.remove('active');
+  elements.moveTaskTree.innerHTML = '';
+}
+
+async function updateMoveTaskTree() {
+  const selectedFolderId = elements.moveFolderSelect.value;
+
+  // Load tasks from the selected folder
+  const folder = state.taskFolders.find(f => f.id === selectedFolderId);
+  if (!folder) {
+    elements.moveTaskTree.innerHTML = '<p style="color: var(--text-secondary); padding: 0.5rem;">Folder not found</p>';
+    return;
+  }
+
+  try {
+    const result = await window.electronAPI.tasks.load(folder.path);
+    if (!result.success) {
+      elements.moveTaskTree.innerHTML = `<p style="color: var(--danger); padding: 0.5rem;">Error: ${result.error}</p>`;
+      return;
+    }
+
+    const tasks = result.tasks || [];
+
+    if (tasks.length === 0) {
+      elements.moveTaskTree.innerHTML = '<p style="color: var(--text-secondary); padding: 0.5rem;">No tasks in this folder. Task will be moved to the root.</p>';
+      return;
+    }
+
+    // Render task tree
+    elements.moveTaskTree.innerHTML = renderMoveTaskTree(tasks, state.movingTask);
+  } catch (error) {
+    console.error('Error loading move task tree:', error);
+    elements.moveTaskTree.innerHTML = `<p style="color: var(--danger); padding: 0.5rem;">Error: ${error.message}</p>`;
+  }
+}
+
+function renderMoveTaskTree(tasks, movingTask, level = 0) {
+  return tasks.map(task => {
+    // Disable the task being moved and all its descendants
+    const isMovingTask = task.filePath === movingTask.filePath;
+    const isDescendant = task.filePath.startsWith(movingTask.filePath.replace('.md', '/'));
+    const isDisabled = isMovingTask || isDescendant;
+
+    const hasChildren = task.children && task.children.length > 0;
+    const itemClass = `move-task-item ${isDisabled ? 'disabled' : ''} ${state.moveSelectedParent === task.filePath ? 'selected' : ''}`;
+
+    let html = `
+      <div>
+        <div class="${itemClass}" data-task-path="${escapeHtml(task.filePath)}" ${!isDisabled ? `onclick="selectMoveParent('${escapeHtml(task.filePath)}', event)"` : ''}>
+          <span class="move-task-expand">${hasChildren ? '▶' : ' '}</span>
+          <span class="move-task-text">${escapeHtml(task.title)}</span>
+        </div>`;
+
+    if (hasChildren) {
+      html += `<div class="move-task-children">
+        ${renderMoveTaskTree(task.children, movingTask, level + 1)}
+      </div>`;
+    }
+
+    html += '</div>';
+    return html;
+  }).join('');
+}
+
+// Global function to handle parent selection (called from onclick)
+window.selectMoveParent = function(taskPath, event) {
+  if (event) event.stopPropagation();
+
+  // Toggle selection
+  if (state.moveSelectedParent === taskPath) {
+    state.moveSelectedParent = null;
+  } else {
+    state.moveSelectedParent = taskPath;
+  }
+
+  // Update UI
+  elements.moveTaskTree.querySelectorAll('.move-task-item').forEach(item => {
+    item.classList.remove('selected');
+  });
+
+  if (state.moveSelectedParent) {
+    const selectedItem = elements.moveTaskTree.querySelector(`[data-task-path="${state.moveSelectedParent}"]`);
+    if (selectedItem) {
+      selectedItem.classList.add('selected');
+    }
+  }
+};
+
+async function confirmMoveTask() {
+  if (!state.movingTask) return;
+
+  const destinationFolderId = elements.moveFolderSelect.value;
+  const destinationParentPath = state.moveSelectedParent || null;
+
+  // Save task info before we clear state
+  const taskTitle = state.movingTask.title;
+  const taskFilePath = state.movingTask.filePath;
+
+  // Confirm if moving to the same folder
+  if (destinationFolderId === state.currentFolderId && !destinationParentPath) {
+    alert('Task is already in this folder at the root level.');
+    return;
+  }
+
+  try {
+    const result = await window.electronAPI.tasks.moveToFolder(
+      taskFilePath,
+      destinationFolderId,
+      destinationParentPath
+    );
+
+    if (result.success) {
+      closeMoveTaskModal();
+      closeTaskModal(); // Close the task details modal too
+      await loadTasks(); // Reload tasks
+
+      // Commit to git if version control is enabled
+      const destFolder = state.taskFolders.find(f => f.id === destinationFolderId);
+      await commitTaskChange(`Move task: ${taskTitle} to ${destFolder?.name || 'folder'}`);
+
+      // Show success message
+      console.log(`Task moved successfully to ${destFolder?.name || 'folder'}`);
+    } else {
+      console.error('Failed to move task:', result.error);
+      alert('Failed to move task: ' + result.error);
+    }
+  } catch (error) {
+    console.error('Error moving task:', error);
+    alert('Error moving task: ' + error.message);
   }
 }
 
@@ -3615,6 +3877,17 @@ function setupKeyboardShortcuts() {
         toggleSortMenu();
         return;
       }
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        // Open move modal if a task is selected
+        if (state.lastSelectedTaskPath) {
+          const task = findTaskByPath(state.tasks, state.lastSelectedTaskPath);
+          if (task) {
+            openMoveTaskModal(task);
+          }
+        }
+        return;
+      }
     }
 
     // Arrow key navigation - handle these specially
@@ -3952,6 +4225,12 @@ async function loadOllamaSettings() {
     state.ollamaModel = result.config.ollamaModel || null;
     state.ollamaAvailable = result.config.ollamaAvailable || false;
 
+    // Load vector DB settings
+    state.vectorDbEnabled = result.config.vectorDbEnabled || false;
+    state.vectorDbUrl = result.config.vectorDbUrl || 'http://localhost:8000';
+    state.vectorDbCollection = result.config.vectorDbCollection || 'tasker_tasks';
+    state.vectorDbConnected = result.config.vectorDbConnected || false;
+
     // Load quick prompts (use defaults if not saved)
     if (result.config.agentQuickPrompts && result.config.agentQuickPrompts.length > 0) {
       state.agentQuickPrompts = result.config.agentQuickPrompts;
@@ -3962,7 +4241,7 @@ async function loadOllamaSettings() {
       state.taskStatuses = result.config.taskStatuses;
     }
 
-    // Update UI
+    // Update Ollama UI
     if (state.ollamaPath && elements.ollamaPathInput) {
       elements.ollamaPathInput.value = state.ollamaPath;
 
@@ -3971,6 +4250,21 @@ async function loadOllamaSettings() {
         await listOllamaModels(state.ollamaPath);
       }
     }
+
+    // Update Vector DB UI
+    if (elements.vectorDbEnabled) {
+      elements.vectorDbEnabled.checked = state.vectorDbEnabled;
+      if (state.vectorDbEnabled) {
+        elements.vectorDbConfig.style.display = 'block';
+      }
+    }
+    if (elements.vectorDbUrl) {
+      elements.vectorDbUrl.value = state.vectorDbUrl;
+    }
+    if (elements.vectorDbCollection) {
+      elements.vectorDbCollection.value = state.vectorDbCollection;
+    }
+    updateVectorDbStatus();
 
     // Render prompts and update agent dropdown
     renderPromptsList();
@@ -5194,6 +5488,59 @@ function setupEventListeners() {
     }
   });
 
+  // Context menu for tasks
+  elements.taskContainer.addEventListener('contextmenu', (e) => {
+    const taskItem = e.target.closest('.task-item');
+    if (!taskItem) return;
+
+    e.preventDefault();
+
+    // Get the task
+    const taskPath = taskItem.dataset.taskPath;
+    const task = findTaskByPath(state.tasks, taskPath);
+    if (!task) return;
+
+    // Store task for context menu actions
+    state.contextMenuTask = task;
+
+    // Position and show context menu
+    elements.taskContextMenu.style.left = `${e.clientX}px`;
+    elements.taskContextMenu.style.top = `${e.clientY}px`;
+    elements.taskContextMenu.classList.add('active');
+  });
+
+  // Context menu item clicks
+  elements.taskContextMenu.addEventListener('click', (e) => {
+    const menuItem = e.target.closest('.context-menu-item');
+    if (!menuItem || !state.contextMenuTask) return;
+
+    const action = menuItem.dataset.action;
+
+    switch (action) {
+      case 'move':
+        openMoveTaskModal(state.contextMenuTask);
+        break;
+      case 'open':
+        openTaskModal(state.contextMenuTask);
+        break;
+      case 'delete':
+        deleteTask(state.contextMenuTask.filePath);
+        break;
+    }
+
+    // Close context menu
+    elements.taskContextMenu.classList.remove('active');
+    state.contextMenuTask = null;
+  });
+
+  // Close context menu when clicking elsewhere
+  document.addEventListener('click', (e) => {
+    if (!elements.taskContextMenu.contains(e.target)) {
+      elements.taskContextMenu.classList.remove('active');
+      state.contextMenuTask = null;
+    }
+  });
+
   // Expand/Collapse All
   elements.expandCollapseBtn.addEventListener('click', toggleExpandCollapseAll);
 
@@ -5416,6 +5763,16 @@ function setupEventListeners() {
     }
   });
 
+  elements.modalMoveBtn.addEventListener('click', () => {
+    if (state.editingTask) {
+      openMoveTaskModal(state.editingTask);
+    }
+  });
+
+  // Move Task Modal
+  elements.moveCancelBtn.addEventListener('click', closeMoveTaskModal);
+  elements.moveConfirmBtn.addEventListener('click', confirmMoveTask);
+
   // Switch to edit mode when clicking on display area
   if (elements.modalDetailsDisplay) {
     elements.modalDetailsDisplay.addEventListener('click', (e) => {
@@ -5466,7 +5823,7 @@ function setupEventListeners() {
     }
   });
 
-  // Escape key to close modals
+  // Escape key to close modals and views
   document.addEventListener('keydown', async (e) => {
     if (e.key === 'Escape') {
       // If we're in an input field, clear it and blur
@@ -5477,12 +5834,17 @@ function setupEventListeners() {
       }
 
       // Check if any modals are open
-      if (elements.taskModal.classList.contains('active')) {
+      if (elements.moveTaskModal.classList.contains('active')) {
+        closeMoveTaskModal();
+      } else if (elements.taskModal.classList.contains('active')) {
         closeTaskModal();
       } else if (elements.addFolderModal.classList.contains('active')) {
         closeAddFolderModal();
       } else if (elements.commitModal.classList.contains('active')) {
         closeCommitModal();
+      } else if (state.currentView === 'help' || state.currentView === 'settings' || state.currentView === 'dashboard') {
+        // If in help, settings, or dashboard, return to tasks view
+        navigateToView('tasks');
       }
     }
   });

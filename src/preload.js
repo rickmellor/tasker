@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     delete: (taskPath) => ipcRenderer.invoke('tasks:delete', taskPath),
     moveToParent: (taskPath, newParentTaskPath) => ipcRenderer.invoke('tasks:move-to-parent', taskPath, newParentTaskPath),
     moveToSibling: (taskPath, targetTaskPath) => ipcRenderer.invoke('tasks:move-to-sibling', taskPath, targetTaskPath),
+    moveToFolder: (taskPath, destinationFolderId, newParentTaskPath) => ipcRenderer.invoke('tasks:move-to-folder', taskPath, destinationFolderId, newParentTaskPath),
     reorder: (dirPath, orderedFileNames) => ipcRenderer.invoke('tasks:reorder', dirPath, orderedFileNames),
     search: (searchText) => ipcRenderer.invoke('tasks:search', searchText),
     clearDeleted: () => ipcRenderer.invoke('tasks:clear-deleted'),

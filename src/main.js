@@ -793,6 +793,79 @@ ipcMain.handle('tasks:move-to-sibling', async (_event, taskPath, targetTaskPath)
   }
 });
 
+ipcMain.handle('tasks:move-to-folder', async (_event, taskPath, destinationFolderId, newParentTaskPath) => {
+  try {
+    const path = require('path');
+    const fs = require('fs').promises;
+
+    // Get config to find the destination folder path
+    const config = await taskStorage.readConfig();
+    const destFolder = config.taskFolders.find(f => f.id === destinationFolderId);
+
+    if (!destFolder) {
+      return { success: false, error: 'Destination folder not found' };
+    }
+
+    // Get the source and destination storage instances
+    const sourceStorage = getStorage();
+    const fileName = path.basename(taskPath);
+    const oldParentPath = path.dirname(taskPath);
+
+    // Determine destination path
+    let destPath;
+    if (newParentTaskPath) {
+      // Moving to a parent task - create parent directory
+      const parentDir = newParentTaskPath.replace('.md', '');
+      await fs.mkdir(parentDir, { recursive: true });
+      destPath = path.join(parentDir, fileName);
+    } else {
+      // Moving to root of destination folder
+      destPath = path.join(destFolder.path, fileName);
+    }
+
+    // Move the task file
+    await fs.rename(taskPath, destPath);
+
+    // Move associated directory if it exists
+    const oldTaskDir = taskPath.replace('.md', '');
+    const newTaskDir = destPath.replace('.md', '');
+    try {
+      const oldDirStats = await fs.stat(oldTaskDir);
+      if (oldDirStats.isDirectory()) {
+        await fs.rename(oldTaskDir, newTaskDir);
+      }
+    } catch (error) {
+      // Directory doesn't exist, that's fine
+    }
+
+    // Update source folder metadata
+    const oldMetadata = await sourceStorage.readMetadata(oldParentPath);
+    oldMetadata.order = oldMetadata.order.filter(f => f !== fileName);
+    await sourceStorage.writeMetadata(oldParentPath, oldMetadata);
+
+    // Update destination folder metadata
+    const destDir = newParentTaskPath ? path.dirname(newParentTaskPath) : destFolder.path;
+
+    // Read or create metadata for destination
+    let destMetadata;
+    try {
+      destMetadata = await sourceStorage.readMetadata(destDir);
+    } catch {
+      destMetadata = { order: [], created: new Date().toISOString(), modified: new Date().toISOString() };
+    }
+
+    if (!destMetadata.order.includes(fileName)) {
+      destMetadata.order.push(fileName);
+      await sourceStorage.writeMetadata(destDir, destMetadata);
+    }
+
+    return { success: true, newPath: destPath };
+  } catch (error) {
+    console.error('[Move to folder] Error:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('tasks:reorder', async (_event, dirPath, orderedFileNames) => {
   try {
     const storage = getStorage();
