@@ -1052,6 +1052,39 @@ ipcMain.handle('ollama:select-file', async () => {
   return null;
 });
 
+ipcMain.handle('vectordb:test-connection', async (_event, url) => {
+  try {
+    const https = require('https');
+    const http = require('http');
+    const urlModule = require('url');
+
+    return new Promise((resolve) => {
+      const parsedUrl = urlModule.parse(url);
+      const protocol = parsedUrl.protocol === 'https:' ? https : http;
+      const healthUrl = `${url}/health`;
+
+      const req = protocol.get(healthUrl, { timeout: 5000 }, (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve({ success: true, status: res.statusCode });
+        } else {
+          resolve({ success: false, error: `HTTP ${res.statusCode}` });
+        }
+      });
+
+      req.on('error', (error) => {
+        resolve({ success: false, error: error.message });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({ success: false, error: 'Connection timeout' });
+      });
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('ollama:chat', async (_event, ollamaPath, modelName, userPrompt, tasksContext) => {
   try {
     const command = ollamaPath && ollamaPath.includes(' ') ? `"${ollamaPath}"` : (ollamaPath || 'ollama');

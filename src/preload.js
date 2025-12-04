@@ -74,6 +74,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     chat: (ollamaPath, modelName, userPrompt, tasksContext) => ipcRenderer.invoke('ollama:chat', ollamaPath, modelName, userPrompt, tasksContext)
   },
 
+  // Vector DB
+  vectordb: {
+    testConnection: (url) => ipcRenderer.invoke('vectordb:test-connection', url)
+  },
+
   // Git
   git: {
     detect: () => ipcRenderer.invoke('git:detect'),

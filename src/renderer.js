@@ -4307,15 +4307,10 @@ async function testVectorDbConnection() {
       return;
     }
 
-    // Test connection by making a simple health check request
-    const response = await fetch(`${url}/health`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json'
-      }
-    });
+    // Test connection via IPC (main process handles the request)
+    const result = await window.electronAPI.vectordb.testConnection(url);
 
-    if (response.ok) {
+    if (result.success) {
       state.vectorDbConnected = true;
       updateVectorDbStatus('✓', 'Connected successfully', 'success');
 
@@ -4323,7 +4318,7 @@ async function testVectorDbConnection() {
       await saveFoldersToStorage();
     } else {
       state.vectorDbConnected = false;
-      updateVectorDbStatus('✗', `Connection failed: ${response.status}`, 'error');
+      updateVectorDbStatus('✗', `Connection failed: ${result.error}`, 'error');
     }
   } catch (error) {
     console.error('Vector DB connection error:', error);
