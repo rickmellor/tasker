@@ -805,13 +805,24 @@ function renderSidebarFolders() {
     `;
   }).join('');
 
-  // Add click handlers
+  // Add click and keyboard handlers
   elements.sidebarFolders.querySelectorAll('.folder-nav-item').forEach(btn => {
     btn.addEventListener('click', (e) => {
       // Only trigger switch if not dragging
       if (!state.draggedFolder) {
         const folderId = btn.dataset.folderId;
         switchFolder(folderId);
+      }
+    });
+
+    // Add keyboard support for Enter and Space
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (!state.draggedFolder) {
+          const folderId = btn.dataset.folderId;
+          switchFolder(folderId);
+        }
       }
     });
   });
@@ -2630,11 +2641,35 @@ function handleTaskKeyboardAction(action) {
 
   switch (action) {
     case 'toggle':
-      // Spacebar: expand/collapse last selected task if has children
+      // Spacebar: toggle completed state for last selected task
+      if (state.lastSelectedTaskPath) {
+        const task = findTaskByPath(state.tasks, state.lastSelectedTaskPath);
+        if (task) {
+          toggleTask(state.lastSelectedTaskPath, task.completed);
+        }
+      }
+      break;
+
+    case 'expand':
+      // Right arrow: expand last selected task if has children
       if (state.lastSelectedTaskPath) {
         const task = findTaskByPath(state.tasks, state.lastSelectedTaskPath);
         if (task && task.children && task.children.length > 0) {
-          toggleExpanded(task.id);
+          if (!state.expandedTasks.has(task.id)) {
+            toggleExpanded(task.id);
+          }
+        }
+      }
+      break;
+
+    case 'collapse':
+      // Left arrow: collapse last selected task if has children
+      if (state.lastSelectedTaskPath) {
+        const task = findTaskByPath(state.tasks, state.lastSelectedTaskPath);
+        if (task && task.children && task.children.length > 0) {
+          if (state.expandedTasks.has(task.id)) {
+            toggleExpanded(task.id);
+          }
         }
       }
       break;
@@ -3372,6 +3407,36 @@ function setupKeyboardShortcuts() {
 
   // Task navigation keyboard shortcuts
   document.addEventListener('keydown', (e) => {
+    // Handle F12 to toggle DevTools (works anywhere)
+    if (e.key === 'F12') {
+      e.preventDefault();
+      if (window.electronAPI.toggleDevTools) {
+        window.electronAPI.toggleDevTools();
+      }
+      return;
+    }
+
+    // Handle Ctrl+X to exit app without minimizing to tray (works anywhere)
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'x' || e.key === 'X')) {
+      e.preventDefault();
+      if (window.electronAPI.quitApp) {
+        window.electronAPI.quitApp();
+      }
+      return;
+    }
+
+    // Handle Ctrl+Tab to cycle through folders (works anywhere, even in input fields)
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Tab') {
+      e.preventDefault();
+      if (state.taskFolders.length > 0) {
+        const currentIndex = state.taskFolders.findIndex(f => f.id === state.currentFolderId);
+        const nextIndex = (currentIndex + 1) % state.taskFolders.length;
+        const nextFolder = state.taskFolders[nextIndex];
+        switchFolder(nextFolder.id);
+      }
+      return;
+    }
+
     // Handle Ctrl+Number folder switching (works anywhere, even in input fields)
     if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
       const folderIndex = parseInt(e.key) - 1;
@@ -3428,6 +3493,11 @@ function setupKeyboardShortcuts() {
     const isArrowKey = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key);
 
     if (isArrowKey) {
+      // Don't handle arrow keys if Ctrl is pressed (used for window snapping)
+      if (e.ctrlKey || e.metaKey) {
+        return;
+      }
+
       // Only handle arrow keys in tasks view and when modal/menus are not open
       const isFilterMenuOpen = elements.filterMenu.classList.contains('active');
       const isSortMenuOpen = elements.sortMenu.classList.contains('active');
@@ -3449,11 +3519,17 @@ function setupKeyboardShortcuts() {
           case 'ArrowLeft':
             if (state.taskViewMode === 'kanban') {
               navigateTasksHorizontal('left', e.shiftKey);
+            } else {
+              // In list view, collapse task
+              handleTaskKeyboardAction('collapse');
             }
             break;
           case 'ArrowRight':
             if (state.taskViewMode === 'kanban') {
               navigateTasksHorizontal('right', e.shiftKey);
+            } else {
+              // In list view, expand task
+              handleTaskKeyboardAction('expand');
             }
             break;
         }

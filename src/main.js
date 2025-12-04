@@ -55,6 +55,29 @@ async function createWindow() {
     mainWindow.webContents.openDevTools();
   }
 
+  // Add context menu to open DevTools (right-click anywhere)
+  mainWindow.webContents.on('context-menu', (e, params) => {
+    const { Menu, MenuItem } = require('electron');
+    const menu = new Menu();
+
+    menu.append(new MenuItem({
+      label: 'Inspect Element',
+      click: () => {
+        mainWindow.webContents.inspectElement(params.x, params.y);
+      }
+    }));
+
+    menu.append(new MenuItem({
+      label: 'Toggle DevTools',
+      accelerator: 'F12',
+      click: () => {
+        mainWindow.webContents.toggleDevTools();
+      }
+    }));
+
+    menu.popup();
+  });
+
   // Save window bounds when moved or resized
   const saveBounds = async () => {
     try {
@@ -574,6 +597,22 @@ ipcMain.handle('exit-app', async () => {
     return { success: true };
   } catch (error) {
     console.error('Error exiting app:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('toggle-devtools', async () => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.webContents.isDevToolsOpened()) {
+        mainWindow.webContents.closeDevTools();
+      } else {
+        mainWindow.webContents.openDevTools();
+      }
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Error toggling DevTools:', error);
     return { success: false, error: error.message };
   }
 });

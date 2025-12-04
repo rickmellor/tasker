@@ -35,6 +35,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   snapWindow: (position) => ipcRenderer.invoke('snap-window', position),
   hideToTray: () => ipcRenderer.invoke('hide-to-tray'),
   exitApp: () => ipcRenderer.invoke('exit-app'),
+  quitApp: () => ipcRenderer.invoke('exit-app'), // Alias for exitApp
+  toggleDevTools: () => ipcRenderer.invoke('toggle-devtools'),
   setCtrlKeyState: (isPressed) => ipcRenderer.send('set-ctrl-key-state', isPressed),
 
   // Task Storage
