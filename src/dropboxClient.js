@@ -1,27 +1,80 @@
 const { Dropbox } = require('dropbox');
+const { DropboxAuth } = require('dropbox');
 const fs = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 
 /**
  * DropboxClient
- * Wrapper around Dropbox SDK for task storage operations
+ * Wrapper around Dropbox SDK for task storage operations with OAuth2 support
  */
 class DropboxClient {
-  constructor(accessToken) {
+  constructor(accessToken, refreshToken = null, clientId = null) {
     this.accessToken = accessToken;
+    this.refreshToken = refreshToken;
+    this.clientId = clientId;
     this.dbx = null;
+    this.dbxAuth = null;
 
-    if (accessToken) {
+    if (clientId && refreshToken) {
+      // OAuth2 mode with refresh token support
+      this.dbxAuth = new DropboxAuth({
+        clientId: clientId,
+        refreshToken: refreshToken,
+        accessToken: accessToken
+      });
+      this.dbx = new Dropbox({ auth: this.dbxAuth });
+      console.log('[DropboxClient] Initialized with OAuth2 + refresh token');
+    } else if (accessToken) {
+      // Legacy mode - direct access token
+      this.dbx = new Dropbox({ accessToken });
+      console.log('[DropboxClient] Initialized with legacy access token');
+    } else {
+      console.warn('[DropboxClient] Initialized without credentials');
+    }
+  }
+
+  /**
+   * Set or update the access token (legacy method)
+   */
+  setAccessToken(accessToken) {
+    this.accessToken = accessToken;
+    if (!this.clientId) {
       this.dbx = new Dropbox({ accessToken });
     }
   }
 
   /**
-   * Set or update the access token
+   * Set OAuth2 credentials (access token + refresh token)
    */
-  setAccessToken(accessToken) {
+  setOAuth2Credentials(accessToken, refreshToken, clientId) {
     this.accessToken = accessToken;
-    this.dbx = new Dropbox({ accessToken });
+    this.refreshToken = refreshToken;
+    this.clientId = clientId;
+
+    this.dbxAuth = new DropboxAuth({
+      clientId: clientId,
+      refreshToken: refreshToken,
+      accessToken: accessToken
+    });
+    this.dbx = new Dropbox({ auth: this.dbxAuth });
+  }
+
+  /**
+   * Get current access token (may trigger refresh if expired)
+   */
+  async getAccessToken() {
+    if (this.dbxAuth) {
+      return await this.dbxAuth.getAccessToken();
+    }
+    return this.accessToken;
+  }
+
+  /**
+   * Get refresh token
+   */
+  getRefreshToken() {
+    return this.refreshToken;
   }
 
   /**
@@ -393,6 +446,68 @@ class DropboxClient {
       console.error('Dropbox recursive list error:', error);
       throw error;
     }
+  }
+
+  /**
+   * Generate PKCE code verifier and challenge for OAuth2
+   * @returns {{codeVerifier: string, codeChallenge: string}}
+   */
+  static generatePKCE() {
+    // Generate random code verifier (43-128 characters)
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+
+    // Generate code challenge (SHA256 hash of verifier)
+    const codeChallenge = crypto
+      .createHash('sha256')
+      .update(codeVerifier)
+      .digest('base64url');
+
+    return { codeVerifier, codeChallenge };
+  }
+
+  /**
+   * Get OAuth2 authorization URL with PKCE
+   * @param {string} clientId - Dropbox app client ID
+   * @param {string} redirectUri - OAuth redirect URI (e.g., http://localhost:3000/oauth/callback)
+   * @param {string} codeChallenge - PKCE code challenge
+   * @returns {string} - Authorization URL to open in browser
+   */
+  static getOAuth2AuthUrl(clientId, redirectUri, codeChallenge) {
+    // Build the authorization URL manually with PKCE parameters
+    const params = new URLSearchParams({
+      client_id: clientId,
+      response_type: 'code',
+      redirect_uri: redirectUri,
+      token_access_type: 'offline', // Request refresh token
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256'
+    });
+
+    return `https://www.dropbox.com/oauth2/authorize?${params.toString()}`;
+  }
+
+  /**
+   * Exchange authorization code for access token and refresh token
+   * @param {string} code - Authorization code from OAuth callback
+   * @param {string} clientId - Dropbox app client ID
+   * @param {string} redirectUri - OAuth redirect URI
+   * @param {string} codeVerifier - PKCE code verifier
+   * @returns {Promise<{accessToken: string, refreshToken: string, expiresIn: number}>}
+   */
+  static async exchangeCodeForToken(code, clientId, redirectUri, codeVerifier) {
+    const dbxAuth = new DropboxAuth({
+      clientId: clientId
+    });
+
+    dbxAuth.setCodeVerifier(codeVerifier);
+
+    const response = await dbxAuth.getAccessTokenFromCode(redirectUri, code);
+
+    return {
+      accessToken: response.result.access_token,
+      refreshToken: response.result.refresh_token,
+      expiresIn: response.result.expires_in
+    };
   }
 }
 

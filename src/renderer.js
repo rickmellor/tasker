@@ -7,6 +7,7 @@ const state = {
   theme: 'auto',
   taskFolders: [], // Array of {id, name, path} objects
   currentFolderId: null, // Currently active folder ID
+  folderErrors: new Map(), // Track folder load errors: folderId -> error message
   expandedTasks: new Set(), // Track which tasks are expanded
   draggedTask: null, // Track task being dragged
   draggedFolder: null, // Track folder being dragged
@@ -26,7 +27,9 @@ const state = {
   ollamaAvailable: false, // Whether ollama is detected and working
   gitPath: null, // Path to git executable
   gitAvailable: false, // Whether git is detected and working
+  dropboxClientId: null, // Dropbox OAuth2 Client ID
   dropboxAccessToken: null, // Dropbox access token
+  dropboxRefreshToken: null, // Dropbox OAuth2 refresh token
   dropboxConnected: false, // Whether connected to Dropbox
   dropboxUserInfo: null, // Dropbox user info (name, email, accountId)
   agentQuickPrompts: [ // Quick prompts for AI agent
@@ -143,6 +146,8 @@ const elements = {
   gitStatusText: document.getElementById('git-status-text'),
 
   // Dropbox
+  dropboxClientIdInput: document.getElementById('dropbox-client-id-input'),
+  oauthLoginBtn: document.getElementById('oauth-login-btn'),
   dropboxTokenInput: document.getElementById('dropbox-token-input'),
   testDropboxBtn: document.getElementById('test-dropbox-btn'),
   dropboxStatus: document.getElementById('dropbox-status'),
@@ -437,7 +442,9 @@ async function saveAllSettings() {
       ollamaAvailable: state.ollamaAvailable,
       gitPath: state.gitPath,
       gitAvailable: state.gitAvailable,
+      dropboxClientId: state.dropboxClientId,
       dropboxAccessToken: state.dropboxAccessToken,
+      dropboxRefreshToken: state.dropboxRefreshToken,
       dropboxConnected: state.dropboxConnected,
       dropboxUserInfo: state.dropboxUserInfo,
       agentQuickPrompts: state.agentQuickPrompts,
@@ -754,17 +761,35 @@ async function switchFolder(folderId) {
   const folder = getCurrentFolder();
   if (folder) {
     // Tell the main process about the folder switch so it can set up DropboxStorage if needed
-    await window.electronAPI.tasks.setCurrentFolder({
+    const setFolderResult = await window.electronAPI.tasks.setCurrentFolder({
       id: folder.id,
       path: folder.path,
       storageType: folder.storageType || 'local',
       dropboxPath: folder.dropboxPath || null
     });
 
+    // Check for errors during folder setup
+    if (!setFolderResult.success) {
+      console.error('Failed to set current folder:', setFolderResult.error);
+      state.folderErrors.set(folder.id, setFolderResult.error);
+      renderSidebarFolders();
+
+      // Still try to initialize and load, but it will likely fail
+      state.tasks = [];
+      renderTasks();
+      return;
+    }
+
     // Initialize the folder before loading tasks
     const initResult = await window.electronAPI.tasks.initialize(folder.path);
     if (initResult.success) {
       await loadTasks();
+    } else {
+      // Store initialization error
+      state.folderErrors.set(folder.id, initResult.error || 'Failed to initialize folder');
+      renderSidebarFolders();
+      state.tasks = [];
+      renderTasks();
     }
   }
 
@@ -788,8 +813,10 @@ function renderSidebarFolders() {
   elements.sidebarFolders.innerHTML = state.taskFolders.map(folder => {
     const isActive = folder.id === state.currentFolderId;
     const isDropbox = folder.storageType === 'dropbox';
+    const hasError = state.folderErrors.has(folder.id);
+    const errorMessage = hasError ? state.folderErrors.get(folder.id) : '';
     return `
-      <button class="nav-item folder-nav-item ${isActive ? 'active' : ''}"
+      <button class="nav-item folder-nav-item ${isActive ? 'active' : ''} ${hasError ? 'folder-error' : ''}"
               data-folder-id="${folder.id}"
               draggable="true">
         <span class="material-icons nav-icon">folder</span>
@@ -800,6 +827,9 @@ function renderSidebarFolders() {
         ${folder.versionControl ? `
           <img src="../assets/git-branch-outline.svg" alt="Git" class="folder-git-icon folder-git-icon-light" title="Version control enabled" />
           <img src="../assets/git-branch-outline-white.svg" alt="Git" class="folder-git-icon folder-git-icon-dark" title="Version control enabled" />
+        ` : ''}
+        ${hasError ? `
+          <span class="material-icons folder-error-icon" title="${escapeHtml(errorMessage)}">warning</span>
         ` : ''}
       </button>
     `;
@@ -1185,17 +1215,34 @@ async function initializeTaskStorage() {
       const currentFolder = getCurrentFolder();
       if (currentFolder) {
         // Tell the main process about the current folder so it can set up DropboxStorage if needed
-        await window.electronAPI.tasks.setCurrentFolder({
+        const setFolderResult = await window.electronAPI.tasks.setCurrentFolder({
           id: currentFolder.id,
           path: currentFolder.path,
           storageType: currentFolder.storageType || 'local',
           dropboxPath: currentFolder.dropboxPath || null
         });
 
-        // Initialize the folder
-        const result = await window.electronAPI.tasks.initialize(currentFolder.path);
-        if (result.success) {
-          await loadTasks();
+        // Check for errors during folder setup
+        if (!setFolderResult.success) {
+          console.error('Failed to set current folder:', setFolderResult.error);
+          state.folderErrors.set(currentFolder.id, setFolderResult.error);
+          renderSidebarFolders();
+
+          // Still try to initialize and load, but it will likely fail
+          state.tasks = [];
+          renderTasks();
+        } else {
+          // Initialize the folder
+          const result = await window.electronAPI.tasks.initialize(currentFolder.path);
+          if (result.success) {
+            await loadTasks();
+          } else {
+            // Store initialization error
+            state.folderErrors.set(currentFolder.id, result.error || 'Failed to initialize folder');
+            renderSidebarFolders();
+            state.tasks = [];
+            renderTasks();
+          }
         }
       }
     } else {
@@ -1594,11 +1641,37 @@ async function loadTasks() {
       renderTasks();
       updateDeletedCount();
       await loadTimeline(); // Load git timeline
+
+      // Clear any previous error for this folder
+      if (state.currentFolderId) {
+        state.folderErrors.delete(state.currentFolderId);
+        renderSidebarFolders(); // Update sidebar to remove error indicator
+      }
     } else {
       console.error('Failed to load tasks:', result.error);
+
+      // Store the error for this folder
+      if (state.currentFolderId) {
+        state.folderErrors.set(state.currentFolderId, result.error);
+        renderSidebarFolders(); // Update sidebar to show error indicator
+      }
+
+      // Show empty state with error message
+      state.tasks = [];
+      renderTasks();
     }
   } catch (error) {
     console.error('Error loading tasks:', error);
+
+    // Store the error for this folder
+    if (state.currentFolderId) {
+      state.folderErrors.set(state.currentFolderId, error.message || 'Failed to load folder');
+      renderSidebarFolders(); // Update sidebar to show error indicator
+    }
+
+    // Show empty state
+    state.tasks = [];
+    renderTasks();
   }
 }
 
@@ -3975,14 +4048,104 @@ function updateDropboxStatus(icon, text, type = 'info') {
   }
 }
 
-async function testDropboxConnection() {
-  const token = elements.dropboxTokenInput?.value?.trim();
+async function handleOAuthLogin() {
+  const clientId = elements.dropboxClientIdInput?.value?.trim();
 
-  if (!token) {
-    alert('Please enter a Dropbox access token');
+  if (!clientId) {
+    alert('Please enter your Dropbox App Key (Client ID)');
     return;
   }
 
+  try {
+    // Disable button during OAuth flow
+    if (elements.oauthLoginBtn) {
+      elements.oauthLoginBtn.disabled = true;
+      elements.oauthLoginBtn.textContent = 'Authorizing...';
+    }
+
+    // Show status
+    if (elements.dropboxStatus) {
+      elements.dropboxStatus.style.display = 'block';
+    }
+    if (elements.dropboxUserInfo) {
+      elements.dropboxUserInfo.style.display = 'none';
+    }
+    updateDropboxStatus('⏳', 'Opening browser for authorization...', 'info');
+
+    // Start OAuth flow
+    const result = await window.electronAPI.dropbox.oauthStart(clientId);
+
+    if (result.success) {
+      // Store OAuth2 credentials
+      state.dropboxClientId = clientId;
+      state.dropboxAccessToken = result.accessToken;
+      state.dropboxRefreshToken = result.refreshToken;
+      state.dropboxConnected = true;
+
+      updateDropboxStatus('⏳', 'Verifying connection...', 'info');
+
+      // Validate and get user info
+      const validateResult = await window.electronAPI.dropbox.validate();
+
+      if (validateResult.success && validateResult.userInfo) {
+        state.dropboxUserInfo = validateResult.userInfo;
+
+        // Update UI
+        updateDropboxStatus('✓', 'Connected via OAuth2', 'success');
+
+        if (elements.dropboxUserName) {
+          elements.dropboxUserName.textContent = validateResult.userInfo.name;
+        }
+        if (elements.dropboxUserEmail) {
+          elements.dropboxUserEmail.textContent = validateResult.userInfo.email;
+        }
+        if (elements.dropboxUserInfo) {
+          elements.dropboxUserInfo.style.display = 'block';
+        }
+
+        // Save settings
+        await saveAllSettings();
+
+        console.log('Dropbox OAuth2 connected successfully:', validateResult.userInfo);
+
+        // If Add Folder modal is open, update the Dropbox option visibility
+        if (elements.addFolderModal.classList.contains('active')) {
+          if (elements.storageTypeDropbox) {
+            elements.storageTypeDropbox.disabled = false;
+            elements.storageTypeDropbox.parentElement.title = '';
+            elements.storageTypeDropbox.parentElement.style.opacity = '1';
+          }
+        }
+
+        // If current folder is a Dropbox folder with an error, try to reload it
+        if (state.currentFolderId) {
+          const currentFolder = getCurrentFolder();
+          if (currentFolder && currentFolder.storageType === 'dropbox' && state.folderErrors.has(currentFolder.id)) {
+            console.log('[OAuth] Reloading current Dropbox folder after successful authentication');
+            await switchFolder(currentFolder.id);
+          }
+        }
+      } else {
+        updateDropboxStatus('✗', validateResult.error || 'Connection failed', 'error');
+      }
+    } else {
+      updateDropboxStatus('✗', result.error || 'Authorization failed', 'error');
+      alert(`Failed to authorize: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('Error during OAuth login:', error);
+    updateDropboxStatus('✗', 'Authorization failed', 'error');
+    alert(`OAuth error: ${error.message}`);
+  } finally {
+    // Re-enable button
+    if (elements.oauthLoginBtn) {
+      elements.oauthLoginBtn.disabled = false;
+      elements.oauthLoginBtn.innerHTML = '<span class="material-icons" style="font-size: 16px; vertical-align: middle; margin-right: 0.25rem;">login</span>Sign in with Dropbox';
+    }
+  }
+}
+
+async function testDropboxConnection() {
   try {
     // Show status
     if (elements.dropboxStatus) {
@@ -3993,19 +4156,35 @@ async function testDropboxConnection() {
     }
     updateDropboxStatus('⏳', 'Testing connection...', 'info');
 
-    // Set the token
-    await window.electronAPI.dropbox.setToken(token);
+    // Check if we have OAuth2 credentials or legacy token
+    const hasOAuth2 = state.dropboxClientId && state.dropboxRefreshToken;
+    const hasLegacyToken = elements.dropboxTokenInput?.value?.trim();
+
+    if (!hasOAuth2 && !hasLegacyToken) {
+      updateDropboxStatus('✗', 'No credentials configured. Please sign in with OAuth2 or enter an access token.', 'error');
+      return;
+    }
+
+    // If OAuth2 credentials exist, use them (they're already set)
+    // If only legacy token exists, set it
+    if (!hasOAuth2 && hasLegacyToken) {
+      await window.electronAPI.dropbox.setToken(hasLegacyToken);
+    }
 
     // Validate the connection
     const result = await window.electronAPI.dropbox.validate();
 
     if (result.success && result.userInfo) {
-      state.dropboxAccessToken = token;
-      state.dropboxConnected = true;
+      // Update state based on which method is being used
+      if (!hasOAuth2 && hasLegacyToken) {
+        state.dropboxAccessToken = hasLegacyToken;
+        state.dropboxConnected = true;
+      }
       state.dropboxUserInfo = result.userInfo;
 
       // Update UI
-      updateDropboxStatus('✓', 'Connected to Dropbox', 'success');
+      const statusText = hasOAuth2 ? 'Connected via OAuth2' : 'Connected to Dropbox';
+      updateDropboxStatus('✓', statusText, 'success');
 
       if (elements.dropboxUserName) {
         elements.dropboxUserName.textContent = result.userInfo.name;
@@ -4088,33 +4267,59 @@ async function loadDropboxSettings() {
   const result = await window.electronAPI.config.read();
 
   if (result.success && result.config) {
+    state.dropboxClientId = result.config.dropboxClientId || null;
     state.dropboxAccessToken = result.config.dropboxAccessToken || null;
+    state.dropboxRefreshToken = result.config.dropboxRefreshToken || null;
     state.dropboxConnected = result.config.dropboxConnected || false;
     state.dropboxUserInfo = result.config.dropboxUserInfo || null;
 
     // Update UI
+    if (state.dropboxClientId && elements.dropboxClientIdInput) {
+      elements.dropboxClientIdInput.value = state.dropboxClientId;
+    }
     if (state.dropboxAccessToken && elements.dropboxTokenInput) {
       elements.dropboxTokenInput.value = state.dropboxAccessToken;
+    }
 
-      // Show connection status if connected
-      if (state.dropboxConnected && state.dropboxUserInfo) {
-        if (elements.dropboxStatus) {
-          elements.dropboxStatus.style.display = 'block';
-        }
-        updateDropboxStatus('✓', 'Connected to Dropbox', 'success');
-
-        if (elements.dropboxUserName) {
-          elements.dropboxUserName.textContent = state.dropboxUserInfo.name;
-        }
-        if (elements.dropboxUserEmail) {
-          elements.dropboxUserEmail.textContent = state.dropboxUserInfo.email;
-        }
-        if (elements.dropboxUserInfo) {
-          elements.dropboxUserInfo.style.display = 'block';
-        }
-
-        // Set the token in the backend
+    // If we have OAuth2 credentials, restore them
+    if (state.dropboxClientId && state.dropboxRefreshToken) {
+      try {
+        await window.electronAPI.dropbox.setOAuth2(
+          state.dropboxAccessToken,
+          state.dropboxRefreshToken,
+          state.dropboxClientId
+        );
+        console.log('[Dropbox] OAuth2 credentials restored from config');
+      } catch (error) {
+        console.error('[Dropbox] Failed to restore OAuth2 credentials:', error);
+      }
+    } else if (state.dropboxAccessToken) {
+      // Legacy access token mode
+      try {
         await window.electronAPI.dropbox.setToken(state.dropboxAccessToken);
+        console.log('[Dropbox] Legacy access token restored from config');
+      } catch (error) {
+        console.error('[Dropbox] Failed to restore access token:', error);
+      }
+    }
+
+    // Show connection status if connected
+    if (state.dropboxConnected && state.dropboxUserInfo) {
+      if (elements.dropboxStatus) {
+        elements.dropboxStatus.style.display = 'block';
+      }
+
+      const statusText = state.dropboxRefreshToken ? 'Connected via OAuth2' : 'Connected to Dropbox';
+      updateDropboxStatus('✓', statusText, 'success');
+
+      if (elements.dropboxUserName) {
+        elements.dropboxUserName.textContent = state.dropboxUserInfo.name;
+      }
+      if (elements.dropboxUserEmail) {
+        elements.dropboxUserEmail.textContent = state.dropboxUserInfo.email;
+      }
+      if (elements.dropboxUserInfo) {
+        elements.dropboxUserInfo.style.display = 'block';
       }
     }
   }
@@ -5056,6 +5261,9 @@ function setupEventListeners() {
   elements.browseGitBtn.addEventListener('click', browseForGit);
 
   // Dropbox
+  if (elements.oauthLoginBtn) {
+    elements.oauthLoginBtn.addEventListener('click', handleOAuthLogin);
+  }
   if (elements.testDropboxBtn) {
     elements.testDropboxBtn.addEventListener('click', testDropboxConnection);
   }

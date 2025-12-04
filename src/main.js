@@ -7,6 +7,7 @@ const taskStorage = require('./taskStorage');
 const DropboxClient = require('./dropboxClient');
 const RamdiskManager = require('./ramdiskManager');
 const DropboxStorage = require('./dropboxStorage');
+const OAuthServer = require('./oauthServer');
 
 const execAsync = promisify(exec);
 
@@ -1599,6 +1600,130 @@ ipcMain.handle('dropbox:move', async (_event, fromPath, toPath) => {
     return result;
   } catch (error) {
     console.error('Error moving in Dropbox:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// OAuth2 flow state
+let oauthServer = null;
+let oauthPKCE = null;
+
+// Start OAuth2 flow
+ipcMain.handle('dropbox:oauth-start', async (_event, clientId) => {
+  try {
+    console.log('[OAuth] Starting OAuth2 flow with clientId:', clientId);
+
+    // Generate PKCE codes
+    oauthPKCE = DropboxClient.generatePKCE();
+    console.log('[OAuth] Generated PKCE codes');
+
+    // Start OAuth callback server
+    oauthServer = new OAuthServer();
+    const redirectUri = oauthServer.getRedirectUri();
+    console.log('[OAuth] OAuth callback server started on:', redirectUri);
+
+    // Get authorization URL
+    const authUrl = DropboxClient.getOAuth2AuthUrl(
+      clientId,
+      redirectUri,
+      oauthPKCE.codeChallenge
+    );
+    console.log('[OAuth] Generated auth URL:', authUrl);
+
+    // Start server and wait for callback
+    const callbackPromise = oauthServer.start();
+
+    // Open browser to authorization page
+    await shell.openExternal(authUrl);
+    console.log('[OAuth] Opened browser to auth URL');
+
+    // Wait for callback (with timeout)
+    const callbackResult = await Promise.race([
+      callbackPromise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('OAuth timeout (5 minutes)')), 300000)
+      )
+    ]);
+    console.log('[OAuth] Received callback with code');
+
+    // Exchange code for tokens
+    console.log('[OAuth] Exchanging code for tokens...');
+    const tokens = await DropboxClient.exchangeCodeForToken(
+      callbackResult.code,
+      clientId,
+      redirectUri,
+      oauthPKCE.codeVerifier
+    );
+    console.log('[OAuth] Successfully obtained tokens');
+
+    // Create new Dropbox client with OAuth2
+    dropboxClient = new DropboxClient(
+      tokens.accessToken,
+      tokens.refreshToken,
+      clientId
+    );
+    console.log('[OAuth] Created new Dropbox client');
+
+    // Clean up
+    if (oauthServer) {
+      oauthServer.stop();
+      oauthServer = null;
+    }
+    oauthPKCE = null;
+
+    return {
+      success: true,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresIn: tokens.expiresIn
+    };
+  } catch (error) {
+    console.error('[OAuth] Error in OAuth flow:', error);
+    console.error('[OAuth] Error stack:', error.stack);
+
+    // Clean up on error
+    if (oauthServer) {
+      try {
+        oauthServer.stop();
+      } catch (stopError) {
+        console.error('[OAuth] Error stopping server:', stopError);
+      }
+      oauthServer = null;
+    }
+    oauthPKCE = null;
+
+    return { success: false, error: String(error.message || error) };
+  }
+});
+
+// Set OAuth2 credentials (for loading from config)
+ipcMain.handle('dropbox:set-oauth2', async (_event, accessToken, refreshToken, clientId) => {
+  try {
+    dropboxClient = new DropboxClient(accessToken, refreshToken, clientId);
+    return { success: true };
+  } catch (error) {
+    console.error('Error setting OAuth2 credentials:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get current OAuth2 tokens (for saving to config)
+ipcMain.handle('dropbox:get-tokens', async () => {
+  try {
+    if (!dropboxClient) {
+      return { success: false, error: 'Not connected to Dropbox' };
+    }
+
+    const accessToken = await dropboxClient.getAccessToken();
+    const refreshToken = dropboxClient.getRefreshToken();
+
+    return {
+      success: true,
+      accessToken,
+      refreshToken
+    };
+  } catch (error) {
+    console.error('Error getting tokens:', error);
     return { success: false, error: error.message };
   }
 });

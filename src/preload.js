@@ -101,6 +101,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncPush: (folderId, dropboxPath) => ipcRenderer.invoke('dropbox:sync-push', folderId, dropboxPath),
     getRamdiskPath: (folderId) => ipcRenderer.invoke('dropbox:get-ramdisk-path', folderId),
     delete: (dropboxPath) => ipcRenderer.invoke('dropbox:delete', dropboxPath),
-    move: (fromPath, toPath) => ipcRenderer.invoke('dropbox:move', fromPath, toPath)
+    move: (fromPath, toPath) => ipcRenderer.invoke('dropbox:move', fromPath, toPath),
+    // OAuth2 methods
+    oauthStart: (clientId) => ipcRenderer.invoke('dropbox:oauth-start', clientId),
+    setOAuth2: (accessToken, refreshToken, clientId) => ipcRenderer.invoke('dropbox:set-oauth2', accessToken, refreshToken, clientId),
+    getTokens: () => ipcRenderer.invoke('dropbox:get-tokens')
   }
 });
