@@ -3489,8 +3489,17 @@ function setupKeyboardShortcuts() {
       return;
     }
 
-    // Handle Ctrl+X to exit app without minimizing to tray (works anywhere)
+    // Handle Ctrl+X or Ctrl+Alt+F4 to exit app without minimizing to tray (works anywhere)
     if ((e.ctrlKey || e.metaKey) && (e.key === 'x' || e.key === 'X')) {
+      e.preventDefault();
+      if (window.electronAPI.quitApp) {
+        window.electronAPI.quitApp();
+      }
+      return;
+    }
+
+    // Handle Ctrl+Alt+F4 to exit app
+    if ((e.ctrlKey || e.metaKey) && e.altKey && e.key === 'F4') {
       e.preventDefault();
       if (window.electronAPI.quitApp) {
         window.electronAPI.quitApp();
@@ -3521,10 +3530,29 @@ function setupKeyboardShortcuts() {
       }
     }
 
-    // Handle F-key navigation (works anywhere)
+    // Handle F-key navigation (works anywhere except when in input fields)
+    const isInInputField = e.target.matches('input, textarea, [contenteditable="true"]');
+
     if (e.key === 'F1') {
       e.preventDefault();
-      navigateToView('help');
+      // If in tasks view with a selected task, enable inline edit
+      if (state.currentView === 'tasks' && state.lastSelectedTaskPath && !isInInputField) {
+        const task = findTaskByPath(state.tasks, state.lastSelectedTaskPath);
+        if (task) {
+          // Find the task element and its text element
+          const escapedPath = state.lastSelectedTaskPath.replace(/\\/g, '\\\\');
+          const taskElement = document.querySelector(`.task-item[data-task-path="${escapedPath}"]`);
+          if (taskElement) {
+            const textElement = taskElement.querySelector('.task-text');
+            if (textElement) {
+              enableInlineEdit(textElement);
+            }
+          }
+        }
+      } else {
+        // If not in tasks view, navigate to help
+        navigateToView('help');
+      }
       return;
     }
     if (e.key === 'F2') {
@@ -3535,6 +3563,33 @@ function setupKeyboardShortcuts() {
     if (e.key === 'F5') {
       e.preventDefault();
       navigateToView('settings');
+      return;
+    }
+
+    // Handle Ctrl+A to focus AI agent input (works anywhere)
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'a' || e.key === 'A')) {
+      // Don't override Ctrl+A in text input fields (select all)
+      if (!e.target.matches('input, textarea, [contenteditable="true"]')) {
+        e.preventDefault();
+        if (elements.agentInput) {
+          elements.agentInput.focus();
+          elements.agentInput.select();
+        }
+        return;
+      }
+    }
+
+    // Handle Ctrl+Q to open AI quick prompts menu (works anywhere)
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'q' || e.key === 'Q')) {
+      e.preventDefault();
+      toggleAgentQuickMenu();
+      // Focus first prompt option after a small delay to ensure menu is visible
+      setTimeout(() => {
+        const firstOption = elements.agentQuickMenu?.querySelector('.agent-quick-option');
+        if (firstOption) {
+          firstOption.focus();
+        }
+      }, 10);
       return;
     }
 
@@ -3571,14 +3626,21 @@ function setupKeyboardShortcuts() {
         return;
       }
 
+      // Don't handle arrow keys if user is typing in an input field or textarea
+      if (e.target.matches('input, textarea, [contenteditable="true"]')) {
+        return;
+      }
+
       // Only handle arrow keys in tasks view and when modal/menus are not open
       const isFilterMenuOpen = elements.filterMenu.classList.contains('active');
       const isSortMenuOpen = elements.sortMenu.classList.contains('active');
+      const isAgentQuickMenuOpen = elements.agentQuickMenu.classList.contains('active');
 
       if (state.currentView === 'tasks' &&
           !elements.taskModal.classList.contains('active') &&
           !isFilterMenuOpen &&
-          !isSortMenuOpen) {
+          !isSortMenuOpen &&
+          !isAgentQuickMenuOpen) {
         e.preventDefault();
         e.stopPropagation();
 
@@ -3620,8 +3682,8 @@ function setupKeyboardShortcuts() {
       return;
     }
 
-    // Only block Space, Enter, Delete when in text input fields (except task input)
-    const isInTextInput = e.target.matches('input:not(#task-input):not([type="checkbox"]), textarea:not(#task-input)');
+    // Only block Space, Enter, Delete when in text input fields (except task input) or contenteditable elements
+    const isInTextInput = e.target.matches('input:not(#taskInput):not([type="checkbox"]), textarea:not(#taskInput), [contenteditable="true"]');
 
     switch (e.key) {
       case ' ':
@@ -4347,6 +4409,15 @@ async function openDropboxBrowser(onSelect) {
   }
 
   await loadDropboxFolder(dropboxBrowser.currentPath);
+
+  // Focus should work - ensure the input is accessible
+  setTimeout(() => {
+    if (elements.dropboxNewFolderInput) {
+      console.log('[Dropbox Browser] Input element:', elements.dropboxNewFolderInput);
+      console.log('[Dropbox Browser] Input disabled?', elements.dropboxNewFolderInput.disabled);
+      console.log('[Dropbox Browser] Input readonly?', elements.dropboxNewFolderInput.readOnly);
+    }
+  }, 100);
 }
 
 function closeDropboxBrowser() {
@@ -4570,6 +4641,7 @@ function updateAgentQuickMenu() {
     button.className = 'agent-quick-option';
     button.dataset.prompt = prompt.prompt;
     button.textContent = prompt.label;
+    button.tabIndex = 0; // Make focusable for keyboard navigation
     elements.agentQuickMenu.appendChild(button);
   });
 
@@ -4580,6 +4652,34 @@ function updateAgentQuickMenu() {
       if (prompt) {
         sendAgentMessage(prompt);
         closeAgentQuickMenu();
+      }
+    });
+
+    // Add keyboard navigation to each option
+    option.addEventListener('keydown', (e) => {
+      const options = Array.from(elements.agentQuickMenu.querySelectorAll('.agent-quick-option'));
+      const currentIndex = options.indexOf(e.currentTarget);
+
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        let nextIndex;
+        if (e.key === 'ArrowDown') {
+          nextIndex = currentIndex < options.length - 1 ? currentIndex + 1 : 0;
+        } else {
+          nextIndex = currentIndex > 0 ? currentIndex - 1 : options.length - 1;
+        }
+        if (options[nextIndex]) {
+          options[nextIndex].focus();
+        }
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        e.currentTarget.click();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeAgentQuickMenu();
+        if (elements.agentInput) {
+          elements.agentInput.focus();
+        }
       }
     });
   });
