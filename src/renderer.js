@@ -4276,6 +4276,91 @@ async function loadOllamaSettings() {
 }
 
 // ========================================
+// Vector Database Integration
+// ========================================
+function updateVectorDbStatus(icon = '○', text = 'Not configured', type = 'info') {
+  if (elements.vectorDbStatusIcon) {
+    elements.vectorDbStatusIcon.textContent = icon;
+  }
+  if (elements.vectorDbStatusText) {
+    elements.vectorDbStatusText.textContent = text;
+  }
+  if (elements.vectorDbStatus) {
+    // Update color based on type
+    if (type === 'success') {
+      elements.vectorDbStatus.style.color = 'var(--success)';
+    } else if (type === 'error') {
+      elements.vectorDbStatus.style.color = 'var(--danger)';
+    } else {
+      elements.vectorDbStatus.style.color = 'var(--text-secondary)';
+    }
+  }
+}
+
+async function testVectorDbConnection() {
+  try {
+    updateVectorDbStatus('⏳', 'Testing connection...', 'info');
+
+    const url = elements.vectorDbUrl.value.trim();
+    if (!url) {
+      updateVectorDbStatus('✗', 'URL is required', 'error');
+      return;
+    }
+
+    // Test connection by making a simple health check request
+    const response = await fetch(`${url}/health`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (response.ok) {
+      state.vectorDbConnected = true;
+      updateVectorDbStatus('✓', 'Connected successfully', 'success');
+
+      // Save settings
+      await saveFoldersToStorage();
+    } else {
+      state.vectorDbConnected = false;
+      updateVectorDbStatus('✗', `Connection failed: ${response.status}`, 'error');
+    }
+  } catch (error) {
+    console.error('Vector DB connection error:', error);
+    state.vectorDbConnected = false;
+    updateVectorDbStatus('✗', `Error: ${error.message}`, 'error');
+  }
+}
+
+function handleVectorDbEnabledChange() {
+  state.vectorDbEnabled = elements.vectorDbEnabled.checked;
+
+  // Show/hide config section
+  if (state.vectorDbEnabled) {
+    elements.vectorDbConfig.style.display = 'block';
+    updateVectorDbStatus('○', 'Configure and test connection', 'info');
+  } else {
+    elements.vectorDbConfig.style.display = 'none';
+    updateVectorDbStatus('○', 'Disabled', 'info');
+  }
+
+  // Save settings
+  saveFoldersToStorage();
+}
+
+function handleVectorDbUrlChange() {
+  state.vectorDbUrl = elements.vectorDbUrl.value.trim();
+  state.vectorDbConnected = false;
+  updateVectorDbStatus('○', 'Click "Test Connection" to verify', 'info');
+  saveFoldersToStorage();
+}
+
+function handleVectorDbCollectionChange() {
+  state.vectorDbCollection = elements.vectorDbCollection.value.trim() || 'tasker_tasks';
+  saveFoldersToStorage();
+}
+
+// ========================================
 // Git Integration
 // ========================================
 function updateGitStatus(icon, text, type = 'info') {
@@ -5702,6 +5787,13 @@ function setupEventListeners() {
   elements.browseOllamaBtn.addEventListener('click', browseForOllama);
   elements.ollamaModelSelect.addEventListener('change', handleOllamaModelChange);
   elements.refreshModelsBtn.addEventListener('click', refreshOllamaModels);
+
+  // Git
+  // Vector DB
+  elements.vectorDbEnabled.addEventListener('change', handleVectorDbEnabledChange);
+  elements.vectorDbUrl.addEventListener('change', handleVectorDbUrlChange);
+  elements.vectorDbCollection.addEventListener('change', handleVectorDbCollectionChange);
+  elements.testVectorDbBtn.addEventListener('click', testVectorDbConnection);
 
   // Git
   elements.detectGitBtn.addEventListener('click', detectGit);
