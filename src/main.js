@@ -862,7 +862,28 @@ ipcMain.handle('tasks:move-to-folder', async (_event, taskPath, destinationFolde
     }
 
     if (!destMetadata.order.includes(fileName)) {
-      destMetadata.order.push(fileName);
+      // Find the position of the first completed task
+      let insertIndex = destMetadata.order.length; // Default: add at end
+
+      for (let i = 0; i < destMetadata.order.length; i++) {
+        const siblingFileName = destMetadata.order[i];
+        const siblingPath = path.join(destDir, siblingFileName);
+
+        try {
+          const siblingTask = await sourceStorage.parseTaskFile(siblingPath);
+          if (siblingTask.completed) {
+            // Found first completed task, insert moved task before it
+            insertIndex = i;
+            break;
+          }
+        } catch (error) {
+          // If we can't read a sibling task, skip it
+          console.error(`Error reading sibling task ${siblingPath}:`, error);
+        }
+      }
+
+      // Insert at the calculated position (bottom of incomplete, above completed)
+      destMetadata.order.splice(insertIndex, 0, fileName);
       await sourceStorage.writeMetadata(destDir, destMetadata);
     }
 

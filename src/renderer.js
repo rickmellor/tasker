@@ -2791,7 +2791,7 @@ function renderMoveTaskTree(tasks, movingTask, level = 0) {
 
     let html = `
       <div>
-        <div class="${itemClass}" data-task-path="${escapeHtml(task.filePath)}" ${!isDisabled ? `onclick="selectMoveParent('${escapeHtml(task.filePath)}', event)"` : ''}>
+        <div class="${itemClass}" data-task-path="${escapeHtml(task.filePath)}" ${isDisabled ? 'data-disabled="true"' : ''}>
           <span class="move-task-expand">${hasChildren ? '▶' : ' '}</span>
           <span class="move-task-text">${escapeHtml(task.title)}</span>
         </div>`;
@@ -7142,6 +7142,31 @@ function setupEventListeners() {
   // Move Task Modal
   elements.moveCancelBtn.addEventListener('click', closeMoveTaskModal);
   elements.moveConfirmBtn.addEventListener('click', confirmMoveTask);
+
+  // Event delegation for move task tree item selection
+  elements.moveTaskTree.addEventListener('click', (e) => {
+    const taskItem = e.target.closest('.move-task-item');
+    if (taskItem && !taskItem.dataset.disabled) {
+      const taskPath = taskItem.dataset.taskPath;
+      if (taskPath) {
+        // Toggle selection
+        if (state.moveSelectedParent === taskPath) {
+          state.moveSelectedParent = null;
+        } else {
+          state.moveSelectedParent = taskPath;
+        }
+
+        // Update UI
+        elements.moveTaskTree.querySelectorAll('.move-task-item').forEach(item => {
+          item.classList.remove('selected');
+        });
+
+        if (state.moveSelectedParent) {
+          taskItem.classList.add('selected');
+        }
+      }
+    }
+  });
 
   // Switch to edit mode when clicking on display area
   if (elements.modalDetailsDisplay) {
