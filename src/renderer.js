@@ -2069,6 +2069,58 @@ async function loadTasks() {
   }
 }
 
+async function loadOkrs() {
+  try {
+    // Navigate to tasks view first
+    navigateToView('tasks');
+
+    // Load OKRs data
+    const result = await window.electronAPI.okrs.load();
+
+    if (result.success) {
+      state.tasks = result.okrs;
+      // Add parent IDs to all OKRs for easy parent lookup
+      addParentIds(state.tasks);
+      renderTasks();
+      updateDeletedCount();
+    } else {
+      console.error('Failed to load OKRs:', result.error);
+      state.tasks = [];
+      renderTasks();
+    }
+  } catch (error) {
+    console.error('Error loading OKRs:', error);
+    state.tasks = [];
+    renderTasks();
+  }
+}
+
+async function loadGoals() {
+  try {
+    // Navigate to tasks view first
+    navigateToView('tasks');
+
+    // Load Goals data
+    const result = await window.electronAPI.goals.load();
+
+    if (result.success) {
+      state.tasks = result.goals;
+      // Add parent IDs to all goals for easy parent lookup
+      addParentIds(state.tasks);
+      renderTasks();
+      updateDeletedCount();
+    } else {
+      console.error('Failed to load Goals:', result.error);
+      state.tasks = [];
+      renderTasks();
+    }
+  } catch (error) {
+    console.error('Error loading Goals:', error);
+    state.tasks = [];
+    renderTasks();
+  }
+}
+
 async function addTask() {
   const taskText = elements.taskInput.value.trim();
 
@@ -4348,6 +4400,17 @@ async function handleEnableOkrsChange(event) {
   elements.okrsSection.style.display = isEnabled ? 'block' : 'none';
 
   try {
+    // Initialize storage path if enabling
+    if (isEnabled) {
+      const result = await window.electronAPI.okrs.initialize();
+      if (result.success) {
+        // Save the path to config
+        await window.electronAPI.config.update({ okrsPath: result.path });
+      } else {
+        throw new Error(result.error || 'Failed to initialize OKRs storage');
+      }
+    }
+
     // Save the setting
     await saveAllSettings();
   } catch (error) {
@@ -4367,6 +4430,17 @@ async function handleEnableGoalsChange(event) {
   elements.goalsSection.style.display = isEnabled ? 'block' : 'none';
 
   try {
+    // Initialize storage path if enabling
+    if (isEnabled) {
+      const result = await window.electronAPI.goals.initialize();
+      if (result.success) {
+        // Save the path to config
+        await window.electronAPI.config.update({ goalsPath: result.path });
+      } else {
+        throw new Error(result.error || 'Failed to initialize Goals storage');
+      }
+    }
+
     // Save the setting
     await saveAllSettings();
   } catch (error) {
@@ -6693,6 +6767,19 @@ function setupEventListeners() {
         const viewName = btn.dataset.view;
         navigateToView(viewName);
       });
+    }
+  });
+
+  // Sidebar items (OKRs, Goals) - event delegation
+  document.addEventListener('click', (e) => {
+    const sidebarItem = e.target.closest('.sidebar-item');
+    if (sidebarItem) {
+      const dataType = sidebarItem.dataset.type;
+      if (dataType === 'okrs') {
+        loadOkrs();
+      } else if (dataType === 'goals') {
+        loadGoals();
+      }
     }
   });
 

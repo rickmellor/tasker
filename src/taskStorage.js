@@ -40,6 +40,76 @@ class TaskStorage {
   }
 
   /**
+   * Initialize OKRs storage path
+   */
+  async initializeOkrsPath() {
+    const userHome = app.getPath('home');
+    const taskerData = path.join(userHome, '.tasker-data');
+    const okrsPath = path.join(taskerData, 'okrs');
+
+    // Create the directory structure
+    await this.ensureDirectory(okrsPath);
+
+    // Initialize metadata file if it doesn't exist
+    const metadataPath = path.join(okrsPath, this.METADATA_FILE);
+    try {
+      await fs.access(metadataPath);
+    } catch (error) {
+      // Create initial metadata
+      await this.writeMetadata(okrsPath, {
+        order: [],
+        created: new Date().toISOString(),
+        modified: new Date().toISOString()
+      });
+    }
+
+    return okrsPath;
+  }
+
+  /**
+   * Initialize Goals storage path
+   */
+  async initializeGoalsPath() {
+    const userHome = app.getPath('home');
+    const taskerData = path.join(userHome, '.tasker-data');
+    const goalsPath = path.join(taskerData, 'goals');
+
+    // Create the directory structure
+    await this.ensureDirectory(goalsPath);
+
+    // Initialize metadata file if it doesn't exist
+    const metadataPath = path.join(goalsPath, this.METADATA_FILE);
+    try {
+      await fs.access(metadataPath);
+    } catch (error) {
+      // Create initial metadata
+      await this.writeMetadata(goalsPath, {
+        order: [],
+        created: new Date().toISOString(),
+        modified: new Date().toISOString()
+      });
+    }
+
+    return goalsPath;
+  }
+
+  /**
+   * Get OKRs path (constructs path without creating directory)
+   */
+  getOkrsPath() {
+    const userHome = app.getPath('home');
+    return path.join(userHome, '.tasker-data', 'okrs');
+  }
+
+  /**
+   * Get Goals path (constructs path without creating directory)
+   */
+  getGoalsPath() {
+    const userHome = app.getPath('home');
+    return path.join(userHome, '.tasker-data', 'goals');
+  }
+
+  /**
    * Ensure a directory exists, create it if it doesn't
    */
   async ensureDirectory(dirPath) {

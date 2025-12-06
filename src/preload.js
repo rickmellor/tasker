@@ -59,6 +59,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
     permanentlyDelete: (taskPath) => ipcRenderer.invoke('tasks:permanently-delete', taskPath)
   },
 
+  // OKRs Storage
+  okrs: {
+    initialize: () => ipcRenderer.invoke('okrs:initialize'),
+    getPath: () => ipcRenderer.invoke('okrs:get-path'),
+    load: () => ipcRenderer.invoke('okrs:load'),
+    create: (text, body) => ipcRenderer.invoke('okrs:create', text, body),
+    update: (okrPath, updates) => ipcRenderer.invoke('okrs:update', okrPath, updates),
+    delete: (okrPath) => ipcRenderer.invoke('okrs:delete', okrPath),
+    reorder: (orderedFileNames) => ipcRenderer.invoke('okrs:reorder', orderedFileNames)
+  },
+
+  // Goals Storage
+  goals: {
+    initialize: () => ipcRenderer.invoke('goals:initialize'),
+    getPath: () => ipcRenderer.invoke('goals:get-path'),
+    load: () => ipcRenderer.invoke('goals:load'),
+    create: (text, body) => ipcRenderer.invoke('goals:create', text, body),
+    update: (goalPath, updates) => ipcRenderer.invoke('goals:update', goalPath, updates),
+    delete: (goalPath) => ipcRenderer.invoke('goals:delete', goalPath),
+    reorder: (orderedFileNames) => ipcRenderer.invoke('goals:reorder', orderedFileNames)
+  },
+
   // Config Storage
   config: {
     read: () => ipcRenderer.invoke('config:read'),

@@ -701,6 +701,132 @@ ipcMain.handle('tasks:get-path', () => {
   return taskStorage.getTasksPath();
 });
 
+// OKRs initialization
+ipcMain.handle('okrs:initialize', async () => {
+  try {
+    const okrsPath = await taskStorage.initializeOkrsPath();
+    return { success: true, path: okrsPath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('okrs:get-path', () => {
+  return taskStorage.getOkrsPath();
+});
+
+// Goals initialization
+ipcMain.handle('goals:initialize', async () => {
+  try {
+    const goalsPath = await taskStorage.initializeGoalsPath();
+    return { success: true, path: goalsPath };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('goals:get-path', () => {
+  return taskStorage.getGoalsPath();
+});
+
+// OKRs CRUD operations
+ipcMain.handle('okrs:load', async () => {
+  try {
+    const okrsPath = taskStorage.getOkrsPath();
+    const okrs = await taskStorage.loadTasks(okrsPath, true);
+    return { success: true, okrs };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('okrs:create', async (_event, text, body) => {
+  try {
+    const okrsPath = taskStorage.getOkrsPath();
+    const okr = await taskStorage.createTask(okrsPath, text, body);
+    return { success: true, okr };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('okrs:update', async (_event, okrPath, updates) => {
+  try {
+    const okr = await taskStorage.updateTask(okrPath, updates);
+    return { success: true, okr };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('okrs:delete', async (_event, okrPath) => {
+  try {
+    await taskStorage.deleteTask(okrPath);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('okrs:reorder', async (_event, orderedFileNames) => {
+  try {
+    const okrsPath = taskStorage.getOkrsPath();
+    await taskStorage.reorderTasks(okrsPath, orderedFileNames);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Goals CRUD operations
+ipcMain.handle('goals:load', async () => {
+  try {
+    const goalsPath = taskStorage.getGoalsPath();
+    const goals = await taskStorage.loadTasks(goalsPath, true);
+    return { success: true, goals };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('goals:create', async (_event, text, body) => {
+  try {
+    const goalsPath = taskStorage.getGoalsPath();
+    const goal = await taskStorage.createTask(goalsPath, text, body);
+    return { success: true, goal };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('goals:update', async (_event, goalPath, updates) => {
+  try {
+    const goal = await taskStorage.updateTask(goalPath, updates);
+    return { success: true, goal };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('goals:delete', async (_event, goalPath) => {
+  try {
+    await taskStorage.deleteTask(goalPath);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('goals:reorder', async (_event, orderedFileNames) => {
+  try {
+    const goalsPath = taskStorage.getGoalsPath();
+    await taskStorage.reorderTasks(goalsPath, orderedFileNames);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('tasks:select-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select Tasks Folder',
