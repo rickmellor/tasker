@@ -112,5 +112,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     oauthStart: (clientId) => ipcRenderer.invoke('dropbox:oauth-start', clientId),
     setOAuth2: (accessToken, refreshToken, clientId) => ipcRenderer.invoke('dropbox:set-oauth2', accessToken, refreshToken, clientId),
     getTokens: () => ipcRenderer.invoke('dropbox:get-tokens')
+  },
+  vectordb: {
+    initialize: (vectorDbUrl, ollamaUrl, embeddingModel, collectionName) => ipcRenderer.invoke('vectordb:initialize', vectorDbUrl, ollamaUrl, embeddingModel, collectionName),
+    testConnection: (vectorDbUrl) => ipcRenderer.invoke('vectordb:test-connection', vectorDbUrl),
+    generateEmbeddings: (text) => ipcRenderer.invoke('vectordb:generate-embeddings', text),
+    storeEmbeddings: (taskId, text, metadata) => ipcRenderer.invoke('vectordb:store-embeddings', taskId, text, metadata),
+    updateEmbeddings: (taskId, text, metadata) => ipcRenderer.invoke('vectordb:update-embeddings', taskId, text, metadata),
+    deleteEmbeddings: (taskId) => ipcRenderer.invoke('vectordb:delete-embeddings', taskId),
+    search: (query, limit) => ipcRenderer.invoke('vectordb:search', query, limit),
+    bulkStore: (tasks) => ipcRenderer.invoke('vectordb:bulk-store', tasks),
+    reinitialize: (ollamaUrl, embeddingModel) => ipcRenderer.invoke('vectordb:reinitialize', ollamaUrl, embeddingModel),
+    isInitialized: () => ipcRenderer.invoke('vectordb:is-initialized')
   }
 });

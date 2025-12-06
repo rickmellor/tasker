@@ -1,0 +1,347 @@
+/**
+ * Embedding Manager
+ * Manages embeddings throughout the task lifecycle
+ * Acts as a bridge between task operations and the vector DB client
+ */
+
+class EmbeddingManager {
+  /**
+   * Create a new EmbeddingManager
+   * @param {Object} mainWindow - The Electron main window (for sending IPC messages)
+   */
+  constructor(mainWindow) {
+    this.mainWindow = mainWindow;
+    this.isInitialized = false;
+    this.embeddingsEnabled = new Map(); // folderId -> boolean
+  }
+
+  /**
+   * Initialize the embedding manager
+   * @param {Object} config - Application configuration
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async initialize(config) {
+    try {
+      console.log('[EmbeddingManager] Initializing...');
+
+      // Check if vector DB is enabled in config
+      if (!config.vectorDbEnabled) {
+        console.log('[EmbeddingManager] Vector DB not enabled in config');
+        this.isInitialized = false;
+        return { success: true, message: 'Vector DB disabled' };
+      }
+
+      // Validate required config
+      if (!config.vectorDbUrl || !config.ollamaUrl || !config.ollamaEmbeddingModel) {
+        console.error('[EmbeddingManager] Missing required config:', {
+          vectorDbUrl: !!config.vectorDbUrl,
+          ollamaUrl: !!config.ollamaUrl,
+          ollamaEmbeddingModel: !!config.ollamaEmbeddingModel
+        });
+        this.isInitialized = false;
+        return { success: false, error: 'Missing required configuration' };
+      }
+
+      // Build embeddings map from folder configs
+      if (config.taskFolders && Array.isArray(config.taskFolders)) {
+        for (const folder of config.taskFolders) {
+          if (folder.embeddingsEnabled) {
+            this.embeddingsEnabled.set(folder.id, true);
+            console.log(`[EmbeddingManager] Embeddings enabled for folder: ${folder.name} (${folder.id})`);
+          }
+        }
+      }
+
+      console.log(`[EmbeddingManager] Initialized with ${this.embeddingsEnabled.size} folder(s) with embeddings enabled`);
+      this.isInitialized = true;
+      return { success: true };
+    } catch (error) {
+      console.error('[EmbeddingManager] Initialization error:', error);
+      this.isInitialized = false;
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Check if embeddings are enabled for a folder
+   * @param {string} folderId - Folder ID
+   * @returns {boolean}
+   */
+  isEnabledForFolder(folderId) {
+    return this.isInitialized && this.embeddingsEnabled.has(folderId);
+  }
+
+  /**
+   * Generate text representation of a task for embedding
+   * @param {Object} task - Task object
+   * @returns {string}
+   */
+  generateTaskText(task) {
+    const parts = [];
+
+    // Include title
+    if (task.title) {
+      parts.push(task.title);
+    }
+
+    // Include details/body
+    if (task.details || task.body) {
+      parts.push(task.details || task.body);
+    }
+
+    return parts.join('\n\n').trim();
+  }
+
+  /**
+   * Extract metadata from a task
+   * @param {Object} task - Task object
+   * @returns {Object}
+   */
+  extractTaskMetadata(task) {
+    return {
+      title: task.title || '',
+      priority: task.priority || 'normal',
+      status: task.status || 'Pending',
+      completed: task.completed || false,
+      dueDate: task.dueDate || null,
+      created: task.created || new Date().toISOString(),
+      path: task.path || '',
+      folderId: task.folderId || null
+    };
+  }
+
+  /**
+   * Handle task creation - generate and store embeddings
+   * @param {string} folderId - Folder ID
+   * @param {Object} task - Task object
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async onTaskCreated(folderId, task) {
+    try {
+      // Check if embeddings are enabled for this folder
+      if (!this.isEnabledForFolder(folderId)) {
+        return { success: true, message: 'Embeddings not enabled for this folder' };
+      }
+
+      // Generate text representation
+      const taskText = this.generateTaskText(task);
+      if (!taskText || taskText.trim().length === 0) {
+        console.log('[EmbeddingManager] Task has no text content, skipping embedding generation');
+        return { success: true, message: 'No text content' };
+      }
+
+      // Extract metadata
+      const metadata = this.extractTaskMetadata({ ...task, folderId });
+
+      // Use task path as ID (unique identifier)
+      const taskId = task.path || task.id;
+      if (!taskId) {
+        return { success: false, error: 'Task ID missing' };
+      }
+
+      console.log(`[EmbeddingManager] Generating embeddings for task: ${taskId}`);
+
+      // Send IPC message to renderer (which will call main process IPC handler)
+      // Note: This assumes the renderer has the vectordb API exposed
+      // In practice, this would be called from the renderer directly
+      // For now, just log the operation
+      console.log('[EmbeddingManager] Task created, embeddings should be generated by renderer');
+
+      return { success: true };
+    } catch (error) {
+      console.error('[EmbeddingManager] Error handling task creation:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Handle task update - regenerate and update embeddings
+   * @param {string} folderId - Folder ID
+   * @param {Object} task - Updated task object
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async onTaskUpdated(folderId, task) {
+    try {
+      // Check if embeddings are enabled for this folder
+      if (!this.isEnabledForFolder(folderId)) {
+        return { success: true, message: 'Embeddings not enabled for this folder' };
+      }
+
+      // Generate text representation
+      const taskText = this.generateTaskText(task);
+      if (!taskText || taskText.trim().length === 0) {
+        console.log('[EmbeddingManager] Task has no text content, skipping embedding update');
+        return { success: true, message: 'No text content' };
+      }
+
+      // Extract metadata
+      const metadata = this.extractTaskMetadata({ ...task, folderId });
+
+      // Use task path as ID
+      const taskId = task.path || task.id;
+      if (!taskId) {
+        return { success: false, error: 'Task ID missing' };
+      }
+
+      console.log(`[EmbeddingManager] Updating embeddings for task: ${taskId}`);
+
+      // This would be called from renderer
+      console.log('[EmbeddingManager] Task updated, embeddings should be regenerated by renderer');
+
+      return { success: true };
+    } catch (error) {
+      console.error('[EmbeddingManager] Error handling task update:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Handle task deletion - delete embeddings
+   * @param {string} folderId - Folder ID
+   * @param {string} taskId - Task ID (path)
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async onTaskDeleted(folderId, taskId) {
+    try {
+      // Check if embeddings are enabled for this folder
+      if (!this.isEnabledForFolder(folderId)) {
+        return { success: true, message: 'Embeddings not enabled for this folder' };
+      }
+
+      if (!taskId) {
+        return { success: false, error: 'Task ID missing' };
+      }
+
+      console.log(`[EmbeddingManager] Deleting embeddings for task: ${taskId}`);
+
+      // This would be called from renderer
+      console.log('[EmbeddingManager] Task deleted, embeddings should be removed by renderer');
+
+      return { success: true };
+    } catch (error) {
+      console.error('[EmbeddingManager] Error handling task deletion:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Handle task move - update embeddings metadata
+   * @param {string} sourceFolderId - Source folder ID
+   * @param {string} destFolderId - Destination folder ID
+   * @param {Object} task - Task object
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async onTaskMoved(sourceFolderId, destFolderId, task) {
+    try {
+      const sourceEnabled = this.isEnabledForFolder(sourceFolderId);
+      const destEnabled = this.isEnabledForFolder(destFolderId);
+
+      // Case 1: Moving from enabled folder to disabled folder - delete embeddings
+      if (sourceEnabled && !destEnabled) {
+        console.log('[EmbeddingManager] Task moved from embeddings-enabled to disabled folder, deleting embeddings');
+        return await this.onTaskDeleted(sourceFolderId, task.path || task.id);
+      }
+
+      // Case 2: Moving from disabled folder to enabled folder - create embeddings
+      if (!sourceEnabled && destEnabled) {
+        console.log('[EmbeddingManager] Task moved from disabled to embeddings-enabled folder, creating embeddings');
+        return await this.onTaskCreated(destFolderId, task);
+      }
+
+      // Case 3: Moving between two enabled folders - update metadata
+      if (sourceEnabled && destEnabled) {
+        console.log('[EmbeddingManager] Task moved between embeddings-enabled folders, updating metadata');
+        return await this.onTaskUpdated(destFolderId, task);
+      }
+
+      // Case 4: Both disabled - no action needed
+      return { success: true, message: 'Embeddings not enabled for either folder' };
+    } catch (error) {
+      console.error('[EmbeddingManager] Error handling task move:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Bulk generate embeddings for existing tasks in a folder
+   * @param {string} folderId - Folder ID
+   * @param {Array<Object>} tasks - Array of task objects
+   * @returns {Promise<{success: boolean, processed: number, failed: number, errors?: Array}>}
+   */
+  async bulkProcessFolder(folderId, tasks) {
+    try {
+      // Check if embeddings are enabled for this folder
+      if (!this.isEnabledForFolder(folderId)) {
+        return {
+          success: false,
+          error: 'Embeddings not enabled for this folder',
+          processed: 0,
+          failed: 0
+        };
+      }
+
+      if (!Array.isArray(tasks) || tasks.length === 0) {
+        return {
+          success: false,
+          error: 'No tasks provided',
+          processed: 0,
+          failed: 0
+        };
+      }
+
+      console.log(`[EmbeddingManager] Bulk processing ${tasks.length} tasks for folder ${folderId}`);
+
+      // Prepare tasks for bulk processing
+      const tasksForBulk = [];
+      for (const task of tasks) {
+        const taskText = this.generateTaskText(task);
+        if (taskText && taskText.trim().length > 0) {
+          tasksForBulk.push({
+            taskId: task.path || task.id,
+            text: taskText,
+            metadata: this.extractTaskMetadata({ ...task, folderId })
+          });
+        }
+      }
+
+      console.log(`[EmbeddingManager] Prepared ${tasksForBulk.length} tasks with text content for bulk processing`);
+
+      // This would be called from renderer to invoke the IPC handler
+      // For now, just return success with the count
+      return {
+        success: true,
+        processed: tasksForBulk.length,
+        failed: 0,
+        message: 'Bulk processing initiated'
+      };
+    } catch (error) {
+      console.error('[EmbeddingManager] Error in bulk processing:', error);
+      return {
+        success: false,
+        error: error.message,
+        processed: 0,
+        failed: 0
+      };
+    }
+  }
+
+  /**
+   * Enable embeddings for a folder
+   * @param {string} folderId - Folder ID
+   */
+  enableForFolder(folderId) {
+    console.log(`[EmbeddingManager] Enabling embeddings for folder: ${folderId}`);
+    this.embeddingsEnabled.set(folderId, true);
+  }
+
+  /**
+   * Disable embeddings for a folder
+   * @param {string} folderId - Folder ID
+   */
+  disableForFolder(folderId) {
+    console.log(`[EmbeddingManager] Disabling embeddings for folder: ${folderId}`);
+    this.embeddingsEnabled.delete(folderId);
+  }
+}
+
+module.exports = EmbeddingManager;

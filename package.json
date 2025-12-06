@@ -20,8 +20,9 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "chokidar": "^3.5.3",
     "dropbox": "^10.34.0",
-    "chokidar": "^3.5.3"
+    "vectra": "^0.11.1"
   },
   "devDependencies": {
     "electron": "^39.2.2",

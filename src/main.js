@@ -8,6 +8,7 @@ const DropboxClient = require('./dropboxClient');
 const RamdiskManager = require('./ramdiskManager');
 const DropboxStorage = require('./dropboxStorage');
 const OAuthServer = require('./oauthServer');
+const VectorDbClient = require('./vectorDbClient');
 
 const execAsync = promisify(exec);
 
@@ -20,6 +21,7 @@ let ramdiskManager = null;
 let dropboxStorages = new Map(); // folderId -> DropboxStorage instance
 let currentFolderId = null; // Track which folder is currently active
 let currentFolderInfo = null; // Store current folder config
+let vectorDbClient = null; // VectorDbClient instance for embeddings
 
 async function createWindow() {
   // Hide the menu bar
@@ -55,29 +57,6 @@ async function createWindow() {
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
   }
-
-  // Add context menu to open DevTools (right-click anywhere)
-  mainWindow.webContents.on('context-menu', (e, params) => {
-    const { Menu, MenuItem } = require('electron');
-    const menu = new Menu();
-
-    menu.append(new MenuItem({
-      label: 'Inspect Element',
-      click: () => {
-        mainWindow.webContents.inspectElement(params.x, params.y);
-      }
-    }));
-
-    menu.append(new MenuItem({
-      label: 'Toggle DevTools',
-      accelerator: 'F12',
-      click: () => {
-        mainWindow.webContents.toggleDevTools();
-      }
-    }));
-
-    menu.popup();
-  });
 
   // Save window bounds when moved or resized
   const saveBounds = async () => {
@@ -232,6 +211,34 @@ async function initializeSettings() {
   try {
     // Load config
     const config = await taskStorage.readConfig();
+
+    // Initialize embedded Vector DB only if Ollama is configured
+    if (config.ollamaUrl && config.ollamaEmbeddingModel) {
+      const vectorPath = path.join(app.getPath('userData'), 'vector-data');
+
+      console.log('[VectorDB] Ollama configured, initializing embedded database...');
+      console.log('[VectorDB] Ollama URL:', config.ollamaUrl);
+      console.log('[VectorDB] Embedding Model:', config.ollamaEmbeddingModel);
+
+      try {
+        vectorDbClient = new VectorDbClient(vectorPath, config.ollamaUrl, config.ollamaEmbeddingModel);
+        const initResult = await vectorDbClient.initialize();
+
+        if (initResult.success) {
+          console.log('[VectorDB] Embedded database initialized successfully');
+          // Create collection
+          await vectorDbClient.createCollection();
+        } else {
+          console.error('[VectorDB] Failed to initialize:', initResult.error);
+        }
+      } catch (error) {
+        console.error('[VectorDB] Error during initialization:', error);
+      }
+    } else {
+      console.log('[VectorDB] Ollama not configured. Embeddings disabled.');
+      console.log('[VectorDB] Configure Ollama in Settings to enable embeddings.');
+      vectorDbClient = null;
+    }
 
     // Apply global hotkey
     const hotkey = config.globalHotkey || 'CommandOrControl+Alt+T';
@@ -975,62 +982,119 @@ ipcMain.handle('config:update', async (_event, updates) => {
 
 // Ollama IPC handlers
 
-async function detectOllama() {
-  // Try common locations for ollama
-  const commonPaths = [
-    'ollama', // Check PATH first
-    'C:\\Program Files\\Ollama\\ollama.exe',
-    'C:\\Users\\' + require('os').userInfo().username + '\\AppData\\Local\\Programs\\Ollama\\ollama.exe',
-    '/usr/local/bin/ollama',
-    '/usr/bin/ollama',
-    '/opt/homebrew/bin/ollama'
-  ];
+async function detectOllama(url = 'http://localhost:11434') {
+  try {
+    // Test Ollama HTTP API
+    const http = require('http');
+    const https = require('https');
+    const urlModule = require('url');
 
-  for (const ollamaPath of commonPaths) {
-    try {
-      // Try to run ollama --version
-      const command = ollamaPath.includes(' ') ? `"${ollamaPath}"` : ollamaPath;
-      const { stdout } = await execAsync(`${command} --version`, { timeout: 5000 });
+    return new Promise((resolve) => {
+      const parsedUrl = urlModule.parse(url);
+      const protocol = parsedUrl.protocol === 'https:' ? https : http;
+      const apiUrl = `${url}/api/version`;
 
-      if (stdout) {
-        console.log(`Found ollama at: ${ollamaPath}`);
-        return { success: true, path: ollamaPath, version: stdout.trim() };
-      }
-    } catch (error) {
-      // Continue to next path
-      continue;
-    }
+      const req = protocol.get(apiUrl, { timeout: 3000 }, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            const version = JSON.parse(data);
+            console.log('Found Ollama via HTTP API:', version);
+            resolve({
+              success: true,
+              path: url,
+              version: version.version || 'unknown'
+            });
+          } catch (parseError) {
+            resolve({ success: false, error: 'Failed to parse Ollama version response' });
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        console.log('Ollama HTTP API not available:', error.message);
+        resolve({
+          success: false,
+          error: 'Ollama not running. Please start Ollama service.'
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({
+          success: false,
+          error: 'Connection to Ollama timed out. Please ensure Ollama is running.'
+        });
+      });
+    });
+  } catch (error) {
+    return { success: false, error: error.message };
   }
-
-  return { success: false, error: 'Ollama not found. Please install Ollama or specify the path manually.' };
 }
 
-ipcMain.handle('ollama:detect', async () => {
-  return await detectOllama();
+ipcMain.handle('ollama:detect', async (_event, url) => {
+  return await detectOllama(url);
 });
 
-ipcMain.handle('ollama:list-models', async (_event, ollamaPath) => {
+ipcMain.handle('ollama:list-models', async (_event, ollamaUrl = 'http://localhost:11434') => {
   try {
-    const command = ollamaPath && ollamaPath.includes(' ') ? `"${ollamaPath}"` : (ollamaPath || 'ollama');
-    const { stdout } = await execAsync(`${command} list`, { timeout: 10000 });
+    console.log('[Main] ollama:list-models called with URL:', ollamaUrl);
 
-    // Parse the output to extract model names
-    const lines = stdout.trim().split('\n');
-    const models = [];
+    // Use HTTP API instead of CLI
+    const http = require('http');
+    const https = require('https');
+    const urlModule = require('url');
 
-    // Skip the header line and parse each model
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line) {
-        // Extract model name (first column)
-        const modelName = line.split(/\s+/)[0];
-        if (modelName) {
-          models.push(modelName);
-        }
-      }
-    }
+    return new Promise((resolve) => {
+      const parsedUrl = urlModule.parse(ollamaUrl);
+      const protocol = parsedUrl.protocol === 'https:' ? https : http;
+      const apiUrl = `${ollamaUrl}/api/tags`;
 
-    return { success: true, models };
+      console.log('[Main] Making HTTP request to:', apiUrl);
+
+      const req = protocol.get(apiUrl, { timeout: 10000 }, (res) => {
+        let data = '';
+
+        res.on('data', (chunk) => {
+          data += chunk;
+        });
+
+        res.on('end', () => {
+          try {
+            const response = JSON.parse(data);
+            console.log('[Ollama] HTTP API response:', response);
+
+            // Extract model names from the response
+            // Response format: { "models": [{ "name": "model:tag", ... }, ...] }
+            const models = response.models ? response.models.map(m => m.name) : [];
+
+            console.log(`[Ollama] Found ${models.length} models:`, models);
+            resolve({ success: true, models });
+          } catch (parseError) {
+            console.error('[Ollama] Failed to parse response:', parseError);
+            resolve({ success: false, error: 'Failed to parse Ollama models response' });
+          }
+        });
+      });
+
+      req.on('error', (error) => {
+        console.error('[Ollama] HTTP request error:', error);
+        resolve({
+          success: false,
+          error: 'Cannot connect to Ollama. Please ensure Ollama is running.'
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        resolve({ success: false, error: 'Request to Ollama timed out' });
+      });
+    });
   } catch (error) {
     console.error('Error listing models:', error);
     return { success: false, error: error.message };
@@ -1052,39 +1116,6 @@ ipcMain.handle('ollama:select-file', async () => {
   return null;
 });
 
-ipcMain.handle('vectordb:test-connection', async (_event, url) => {
-  try {
-    const https = require('https');
-    const http = require('http');
-    const urlModule = require('url');
-
-    return new Promise((resolve) => {
-      const parsedUrl = urlModule.parse(url);
-      const protocol = parsedUrl.protocol === 'https:' ? https : http;
-      const healthUrl = `${url}/health`;
-
-      const req = protocol.get(healthUrl, { timeout: 5000 }, (res) => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve({ success: true, status: res.statusCode });
-        } else {
-          resolve({ success: false, error: `HTTP ${res.statusCode}` });
-        }
-      });
-
-      req.on('error', (error) => {
-        resolve({ success: false, error: error.message });
-      });
-
-      req.on('timeout', () => {
-        req.destroy();
-        resolve({ success: false, error: 'Connection timeout' });
-      });
-    });
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-});
-
 ipcMain.handle('ollama:chat', async (_event, ollamaPath, modelName, userPrompt, tasksContext) => {
   try {
     const command = ollamaPath && ollamaPath.includes(' ') ? `"${ollamaPath}"` : (ollamaPath || 'ollama');
@@ -1101,8 +1132,57 @@ ipcMain.handle('ollama:chat', async (_event, ollamaPath, modelName, userPrompt, 
       timeZoneName: 'short'
     });
 
-    // Build the system message with task context
-    const systemMessage = `You are a helpful task management assistant.
+    // Load config to get custom system prompt
+    const config = await taskStorage.readConfig();
+    const customPrompt = config.ollamaSystemPrompt || null;
+
+    // Use custom prompt if available, otherwise use default
+    const basePrompt = customPrompt || `SYSTEM ROLE — Task Engineering Prioritizer
+
+Your role is to help a professional software engineer maintain clarity, momentum, and predictability across their work.
+When interpreting, ranking, or retrieving tasks, optimize for:
+
+Short-term deliverables that unblock progress or meet upcoming commitments
+
+Medium-horizon work that supports planned features or reduces known risks
+
+Long-term strategic items that prevent future surprises or technical drift
+
+Early detection of slipping tasks, hidden dependencies, or mismatched expectations
+
+Simplicity, accuracy, and actionable recommendations
+
+Always prioritize tasks using the following principles:
+
+Protect near-term commitments first.
+Identify anything due soon, blocking others, or requested by collaborators.
+
+Surface important-but-not-urgent items early.
+Prevent surprises by highlighting tasks that could become risks if ignored.
+
+Expose dependencies and sequencing.
+Clarify what should happen now vs. next vs. later.
+
+Favor clarity and reduction of cognitive load.
+Turn vague or ambiguous items into crisp, actionable units of work.
+
+Be proactively helpful.
+If there's missing context, unclear scope, or signals of risk, gently call attention to it.
+
+When answering queries or selecting context documents:
+
+Focus on the tasks that most influence delivery, risk, quality, or momentum.
+
+Return only the most relevant information, avoiding noise.
+
+Do not invent details or make assumptions beyond what is given.
+
+Offer concise reasoning when ranking or prioritizing items.
+
+Your goal is to help the user stay organized, avoid last-minute surprises, and maintain smooth forward progress across all levels of work.`;
+
+    // Build the system message with task context and date/time
+    const systemMessage = `${basePrompt}
 
 Current Date/Time: ${currentDateTime}
 
@@ -1120,6 +1200,16 @@ Please help the user with their task-related questions. Format your responses wi
 - Be concise and actionable
 
 Use markdown-style formatting: **bold**, *italic*, bullet points (•), numbered lists (1. 2. 3.).`;
+
+    // Log the prompt being sent to LLM
+    console.log('[Ollama] ========== LLM PROMPT ==========');
+    console.log('[Ollama] User Query:', userPrompt);
+    console.log('[Ollama] Tasks Context Length:', tasksContext.length, 'characters');
+    console.log('[Ollama] Tasks Context Preview:', tasksContext.substring(0, 500) + (tasksContext.length > 500 ? '...' : ''));
+    console.log('[Ollama] System Message Length:', systemMessage.length, 'characters');
+    console.log('[Ollama] ------- FULL SYSTEM PROMPT -------');
+    console.log(systemMessage);
+    console.log('[Ollama] ====================================');
 
     // Create a temporary file with the prompt
     const tempFile = require('path').join(require('os').tmpdir(), `ollama-prompt-${Date.now()}.txt`);
@@ -1832,4 +1922,153 @@ ipcMain.handle('dropbox:get-tokens', async () => {
     console.error('Error getting tokens:', error);
     return { success: false, error: error.message };
   }
+});
+
+// ========================================
+// Vector DB IPC handlers (Embedded ChromaDB)
+// ========================================
+// Note: Initialization happens automatically in initializeSettings()
+// No connection testing needed - it's all local!
+
+// Generate embeddings for text
+ipcMain.handle('vectordb:generate-embeddings', async (_event, text) => {
+  try {
+    if (!vectorDbClient) {
+      return { success: false, error: 'Vector DB client not initialized' };
+    }
+
+    const result = await vectorDbClient.generateEmbeddings(text);
+    return result;
+  } catch (error) {
+    console.error('Error generating embeddings:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Store embeddings for a task
+ipcMain.handle('vectordb:store-embeddings', async (_event, taskId, text, metadata) => {
+  try {
+    if (!vectorDbClient) {
+      return { success: false, error: 'Vector DB client not initialized' };
+    }
+
+    // Generate embeddings
+    const embeddingsResult = await vectorDbClient.generateEmbeddings(text);
+    if (!embeddingsResult.success) {
+      return { success: false, error: 'Failed to generate embeddings: ' + embeddingsResult.error };
+    }
+
+    // Store embeddings
+    const storeResult = await vectorDbClient.storeEmbeddings(taskId, embeddingsResult.embeddings, metadata);
+    return storeResult;
+  } catch (error) {
+    console.error('Error storing embeddings:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Update embeddings for a task
+ipcMain.handle('vectordb:update-embeddings', async (_event, taskId, text, metadata) => {
+  try {
+    if (!vectorDbClient) {
+      return { success: false, error: 'Vector DB client not initialized' };
+    }
+
+    // Generate new embeddings
+    const embeddingsResult = await vectorDbClient.generateEmbeddings(text);
+    if (!embeddingsResult.success) {
+      return { success: false, error: 'Failed to generate embeddings: ' + embeddingsResult.error };
+    }
+
+    // Update embeddings
+    const updateResult = await vectorDbClient.updateEmbeddings(taskId, embeddingsResult.embeddings, metadata);
+    return updateResult;
+  } catch (error) {
+    console.error('Error updating embeddings:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Delete embeddings for a task
+ipcMain.handle('vectordb:delete-embeddings', async (_event, taskId) => {
+  try {
+    if (!vectorDbClient) {
+      return { success: false, error: 'Vector DB client not initialized' };
+    }
+
+    const result = await vectorDbClient.deleteEmbeddings(taskId);
+    return result;
+  } catch (error) {
+    console.error('Error deleting embeddings:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Search for similar tasks
+ipcMain.handle('vectordb:search', async (_event, query, limit) => {
+  try {
+    if (!vectorDbClient) {
+      return { success: false, error: 'Vector DB client not initialized' };
+    }
+
+    const result = await vectorDbClient.searchSimilar(query, limit);
+    return result;
+  } catch (error) {
+    console.error('Error searching vector DB:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Bulk store embeddings for multiple tasks
+ipcMain.handle('vectordb:bulk-store', async (_event, tasks) => {
+  try {
+    if (!vectorDbClient) {
+      return { success: false, error: 'Vector DB client not initialized' };
+    }
+
+    const result = await vectorDbClient.bulkStoreEmbeddings(tasks);
+    return result;
+  } catch (error) {
+    console.error('Error bulk storing embeddings:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Delete embeddings database and reinitialize with new settings
+ipcMain.handle('vectordb:reinitialize', async (_event, ollamaUrl, embeddingModel) => {
+  try {
+    console.log('[VectorDB] Reinitializing with new settings...');
+    console.log('[VectorDB] Ollama URL:', ollamaUrl);
+    console.log('[VectorDB] Embedding Model:', embeddingModel);
+
+    // Delete old embeddings database
+    const vectorPath = path.join(app.getPath('userData'), 'vector-data');
+    try {
+      await fs.rm(vectorPath, { recursive: true, force: true });
+      console.log('[VectorDB] Deleted old embeddings database');
+    } catch (error) {
+      console.log('[VectorDB] No existing database to delete');
+    }
+
+    // Reinitialize with new settings
+    vectorDbClient = new VectorDbClient(vectorPath, ollamaUrl, embeddingModel);
+    const initResult = await vectorDbClient.initialize();
+
+    if (initResult.success) {
+      console.log('[VectorDB] Reinitialized successfully');
+      await vectorDbClient.createCollection();
+      return { success: true };
+    } else {
+      console.error('[VectorDB] Failed to reinitialize:', initResult.error);
+      return { success: false, error: initResult.error };
+    }
+  } catch (error) {
+    console.error('[VectorDB] Error reinitializing:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get embeddings status (is it initialized?)
+ipcMain.handle('vectordb:is-initialized', async () => {
+  return { success: true, initialized: vectorDbClient !== null };
 });

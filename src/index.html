@@ -370,7 +370,7 @@
                   </div>
                   <div class="shortcut-item">
                     <kbd>Space</kbd>
-                    <span class="shortcut-description">Toggle task completion for selected task</span>
+                    <span class="shortcut-description">Toggle task completion (automatically reorders and selects next incomplete task)</span>
                   </div>
                   <div class="shortcut-item">
                     <kbd>Enter</kbd>
@@ -387,6 +387,26 @@
                   <div class="shortcut-item">
                     <kbd>Ctrl</kbd> + <kbd>Delete</kbd>
                     <span class="shortcut-description">Permanently delete selected task(s) and all children</span>
+                  </div>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>Task Hierarchy</h4>
+                  <div class="shortcut-item">
+                    <kbd>[</kbd>
+                    <span class="shortcut-description">Promote task one level (move to parent's level)</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>]</kbd>
+                    <span class="shortcut-description">Nest task into the item above it at the same level</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>;</kbd>
+                    <span class="shortcut-description">Move task up one position at the same level</span>
+                  </div>
+                  <div class="shortcut-item">
+                    <kbd>'</kbd>
+                    <span class="shortcut-description">Move task down one position at the same level</span>
                   </div>
                 </div>
 
@@ -611,12 +631,21 @@
                   <p class="setting-description" style="margin-bottom: 0.5rem;">
                     Type in the task input field and press Enter or click "Add" to create a new task. Tasks are automatically saved to your active folder.
                   </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Smart Positioning:</strong> New tasks are automatically positioned at the bottom of all incomplete tasks, but above any completed tasks. This keeps your active work organized at the top.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Same Level Creation:</strong> If you have a task selected, new tasks will be created at the same nesting level as the selected task. This makes it easy to quickly add multiple sibling tasks without manually dragging them.
+                  </p>
                 </div>
 
                 <div class="shortcuts-section">
                   <h4>Organizing Tasks</h4>
                   <p class="setting-description" style="margin-bottom: 0.5rem;">
                     <strong>Drag and Drop:</strong> Click and drag tasks to reorder them. Drag a task onto another task to make it a child (subtask).
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Automatic Organization:</strong> Tasks automatically stay organized with incomplete tasks at the top and completed tasks at the bottom. When you complete a task or add a new one, they're automatically positioned to maintain this organization.
                   </p>
                   <p class="setting-description" style="margin-bottom: 0.5rem;">
                     <strong>Expand/Collapse:</strong> Click the arrow button next to a task to show or hide its children. Use the ⊞/⊟ button in the header to expand or collapse all tasks at once.
@@ -630,6 +659,19 @@
                   </p>
                   <p class="setting-description" style="margin-bottom: 0.5rem;">
                     <strong>Full Edit:</strong> Click anywhere else on a task item to open the full editor where you can set priority, due date, add detailed notes, and mark as complete.
+                  </p>
+                </div>
+
+                <div class="shortcuts-section">
+                  <h4>Completing Tasks</h4>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Automatic Reordering:</strong> When you mark a task as complete, it automatically moves to the bottom of the task list, just above other completed tasks. This keeps incomplete tasks at the top where you can focus on active work.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Smart Selection:</strong> After completing a task, the selection automatically moves to the nearest incomplete task (first checking below, then above). This lets you quickly work through tasks by repeatedly pressing Space to complete and move to the next one.
+                  </p>
+                  <p class="setting-description" style="margin-bottom: 0.5rem;">
+                    <strong>Workflow Tip:</strong> Use keyboard navigation (↑/↓) to move between tasks and Space to complete them. The automatic reordering and selection change creates a smooth workflow for processing your task list.
                   </p>
                 </div>
 
@@ -662,7 +704,7 @@
                     <strong>Filters:</strong> Use the Filters dropdown to show only specific types of tasks (high priority, completed, past due, etc.). Multiple filters can be active at once.
                   </p>
                   <p class="setting-description" style="margin-bottom: 0.5rem;">
-                    <strong>Sort:</strong> Choose how to order your tasks: by priority, due date, creation date, or default order (priority + due date + creation date).
+                    <strong>Sort:</strong> Choose how to order your tasks: by priority, due date, creation date, or default order (positional - preserves manual positioning and drag-and-drop reordering).
                   </p>
                 </div>
 
@@ -773,28 +815,68 @@
                 <h3>Ollama Integration</h3>
 
                 <div class="setting-item">
-                  <label for="ollama-path-input">Ollama Executable Path</label>
+                  <label>Ollama Service URL</label>
                   <div style="display: flex; gap: 0.5rem; align-items: center;">
-                    <input type="text" id="ollama-path-input" class="input-lg" placeholder="Auto-detecting..." readonly style="flex: 1;" />
-                    <button id="browse-ollama-btn" class="icon-btn" title="Browse for ollama executable">
-                      <span class="material-icons">folder_open</span>
-                    </button>
-                    <button id="detect-ollama-btn" class="btn-secondary" style="white-space: nowrap;">Detect</button>
-                  </div>
-                  <p class="setting-description">Path to the Ollama executable for AI integration</p>
-                </div>
-
-                <div class="setting-item" id="ollama-model-section" style="display: none;">
-                  <label for="ollama-model-select">Model</label>
-                  <div style="display: flex; gap: 0.5rem; align-items: center;">
-                    <select id="ollama-model-select" class="select" style="flex: 1; max-width: 100%;">
-                      <option value="">Loading models...</option>
-                    </select>
+                    <input type="text" id="ollama-path-input" class="input-lg" placeholder="http://localhost:11434" style="flex: 1;" />
+                    <button id="detect-ollama-btn" class="btn-secondary" style="white-space: nowrap;">Test Connection</button>
                     <button id="refresh-models-btn" class="icon-btn" title="Refresh model list">
                       <span class="material-icons">refresh</span>
                     </button>
                   </div>
-                  <p class="setting-description">Select the Ollama model to use for AI features</p>
+                  <p class="setting-description">Ollama HTTP API endpoint (e.g., http://localhost:11434 or http://192.168.1.100:11434)</p>
+                </div>
+
+                <div class="setting-item" id="ollama-model-section" style="display: none;">
+                  <label for="ollama-model-select">Chat Model</label>
+                  <select id="ollama-model-select" class="select" style="max-width: 100%;">
+                    <option value="">Loading models...</option>
+                  </select>
+                  <p class="setting-description">Select the Ollama model to use for chat and AI features</p>
+                </div>
+
+                <div class="setting-item" id="ollama-embedding-model-section" style="display: none;">
+                  <label for="ollama-embedding-model-select">Embedding Model</label>
+                  <select id="ollama-embedding-model-select" class="select" style="max-width: 100%;">
+                    <option value="">Loading models...</option>
+                  </select>
+                  <p class="setting-description">
+                    <strong>What are embeddings?</strong> Embeddings convert task text into numerical vectors that capture semantic meaning. This enables semantic search and provides better context to the AI agent.
+                  </p>
+                  <p class="setting-description">
+                    Embeddings are automatically generated for all tasks when you create, update, or move them. Select a model above to enable this feature.
+                  </p>
+
+                  <div id="embeddings-status" style="margin-top: 1rem; padding: 0.75rem; border-radius: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color);">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                      <span id="embeddings-status-icon" class="material-icons" style="font-size: 20px;">info</span>
+                      <span id="embeddings-status-text" style="font-weight: 500;">Checking embeddings status...</span>
+                    </div>
+                  </div>
+
+                  <button id="regenerate-embeddings-btn" class="btn-secondary" style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <span class="material-icons" style="font-size: 18px;">refresh</span>
+                    <span>Regenerate All Embeddings</span>
+                  </button>
+                  <p class="setting-description" style="margin-top: 0.5rem; font-size: 0.85rem;">
+                    Click to regenerate embeddings for all tasks across all folders using the current model. This may take several minutes for large task collections.
+                  </p>
+                </div>
+
+                <div class="setting-item" id="ollama-system-prompt-section" style="display: none;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <label for="ollama-system-prompt">AI Agent System Prompt</label>
+                    <button id="reset-system-prompt-btn" class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.75rem;">
+                      <span class="material-icons" style="font-size: 16px; vertical-align: middle; margin-right: 0.25rem;">refresh</span>
+                      Reset to Default
+                    </button>
+                  </div>
+                  <textarea id="ollama-system-prompt" class="textarea-lg" rows="12" placeholder="Enter system prompt for AI agent..."></textarea>
+                  <p class="setting-description">
+                    Customize how the AI agent interprets and prioritizes your tasks. This prompt defines the agent's behavior, priorities, and decision-making framework.
+                  </p>
+                  <p class="setting-description" style="font-size: 0.85rem; color: var(--text-secondary);">
+                    Changes are saved automatically when you navigate away or close settings.
+                  </p>
                 </div>
 
                 <div class="setting-item">
@@ -802,42 +884,6 @@
                     <span id="ollama-status-icon" style="margin-right: 0.5rem;">⏳</span>
                     <span id="ollama-status-text">Detecting Ollama...</span>
                   </p>
-                </div>
-              </div>
-
-              <div class="settings-section">
-                <h3>Vector Database (Optional)</h3>
-
-                <div class="setting-item">
-                  <label style="display: flex; align-items: center; gap: 0.5rem;">
-                    <input type="checkbox" id="vector-db-enabled" />
-                    <span>Enable Vector Database</span>
-                  </label>
-                  <p class="setting-description">Use a vector database to improve AI context retrieval with semantic search and embeddings</p>
-                </div>
-
-                <div id="vector-db-config" style="display: none;">
-                  <div class="setting-item">
-                    <label for="vector-db-url">Vector Database URL</label>
-                    <div style="display: flex; gap: 0.5rem; align-items: center;">
-                      <input type="text" id="vector-db-url" class="input-lg" placeholder="http://localhost:8000" style="flex: 1;" />
-                      <button id="test-vector-db-btn" class="btn-secondary" style="white-space: nowrap;">Test Connection</button>
-                    </div>
-                    <p class="setting-description">URL endpoint for your vector database server (e.g., Qdrant, Weaviate, Milvus)</p>
-                  </div>
-
-                  <div class="setting-item">
-                    <label for="vector-db-collection">Collection Name (Optional)</label>
-                    <input type="text" id="vector-db-collection" class="input-lg" placeholder="tasker_tasks" />
-                    <p class="setting-description">Name of the collection to store task embeddings. Default: tasker_tasks</p>
-                  </div>
-
-                  <div class="setting-item">
-                    <p id="vector-db-status" style="color: var(--text-secondary); font-size: 0.9rem; margin: 0;">
-                      <span id="vector-db-status-icon" style="margin-right: 0.5rem;">○</span>
-                      <span id="vector-db-status-text">Not configured</span>
-                    </p>
-                  </div>
                 </div>
               </div>
 
@@ -1155,6 +1201,27 @@
       <div class="context-menu-item" data-action="delete">
         <span class="material-icons">delete</span>
         <span>Delete</span>
+      </div>
+    </div>
+
+    <!-- Text Input Context Menu -->
+    <div id="text-context-menu" class="context-menu">
+      <div class="context-menu-item" data-action="copy">
+        <span class="material-icons">content_copy</span>
+        <span>Copy</span>
+      </div>
+      <div class="context-menu-item" data-action="paste">
+        <span class="material-icons">content_paste</span>
+        <span>Paste</span>
+      </div>
+      <div class="context-menu-item" data-action="cut">
+        <span class="material-icons">content_cut</span>
+        <span>Cut</span>
+      </div>
+      <div class="context-menu-divider"></div>
+      <div class="context-menu-item" data-action="select-all">
+        <span class="material-icons">select_all</span>
+        <span>Select All</span>
       </div>
     </div>
 

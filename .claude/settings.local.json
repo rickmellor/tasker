@@ -27,7 +27,16 @@
       "Bash(npm install:*)",
       "Read(//tmp/**)",
       "Bash(cat:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(ollama list:*)",
+      "Bash(taskkill:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(cmd.exe /c taskkill //F //IM electron.exe)",
+      "Bash(cmd.exe /c taskkill /F /IM electron.exe)",
+      "Bash(curl:*)",
+      "Bash(cmd.exe /c tasklist)",
+      "Bash(npm uninstall:*)"
     ],
     "deny": [],
     "ask": []

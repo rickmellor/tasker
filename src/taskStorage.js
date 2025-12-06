@@ -242,7 +242,28 @@ ${body}
     // Update parent metadata to include this task in order
     const metadata = await this.readMetadata(parentPath);
     if (!metadata.order.includes(fileName)) {
-      metadata.order.push(fileName);
+      // Find the position of the first completed task
+      let insertIndex = metadata.order.length; // Default: add at end
+
+      for (let i = 0; i < metadata.order.length; i++) {
+        const siblingFileName = metadata.order[i];
+        const siblingPath = path.join(parentPath, siblingFileName);
+
+        try {
+          const siblingTask = await this.parseTaskFile(siblingPath);
+          if (siblingTask.completed) {
+            // Found first completed task, insert new task before it
+            insertIndex = i;
+            break;
+          }
+        } catch (error) {
+          // If we can't read a sibling task, skip it
+          console.error(`Error reading sibling task ${siblingPath}:`, error);
+        }
+      }
+
+      // Insert at the calculated position
+      metadata.order.splice(insertIndex, 0, fileName);
       await this.writeMetadata(parentPath, metadata);
     }
 
@@ -471,10 +492,21 @@ ${body}
     const oldParentPath = path.dirname(taskPath);
     const newParentPath = path.dirname(targetTaskPath);
 
-    // If already in the same parent, no move needed
-    if (oldParentPath === newParentPath) {
+    console.log('[moveToSibling] Moving:', taskPath);
+    console.log('[moveToSibling] Target:', targetTaskPath);
+    console.log('[moveToSibling] Old parent:', oldParentPath);
+    console.log('[moveToSibling] New parent:', newParentPath);
+
+    // If already in the same parent, no move needed (use normalized comparison)
+    const normalizedOldParent = oldParentPath.replace(/\\/g, '/').toLowerCase();
+    const normalizedNewParent = newParentPath.replace(/\\/g, '/').toLowerCase();
+
+    if (normalizedOldParent === normalizedNewParent) {
+      console.log('[moveToSibling] Already in same parent, no file move needed');
       return taskPath;
     }
+
+    console.log('[moveToSibling] Moving to different parent, performing file operations');
 
     // Ensure the new parent directory exists
     await this.ensureDirectory(newParentPath);

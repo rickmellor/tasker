@@ -1,4 +1,51 @@
 // ========================================
+// Constants
+// ========================================
+const DEFAULT_OLLAMA_SYSTEM_PROMPT = `SYSTEM ROLE — Task Engineering Prioritizer
+
+Your role is to help a professional software engineer maintain clarity, momentum, and predictability across their work.
+When interpreting, ranking, or retrieving tasks, optimize for:
+
+Short-term deliverables that unblock progress or meet upcoming commitments
+
+Medium-horizon work that supports planned features or reduces known risks
+
+Long-term strategic items that prevent future surprises or technical drift
+
+Early detection of slipping tasks, hidden dependencies, or mismatched expectations
+
+Simplicity, accuracy, and actionable recommendations
+
+Always prioritize tasks using the following principles:
+
+Protect near-term commitments first.
+Identify anything due soon, blocking others, or requested by collaborators.
+
+Surface important-but-not-urgent items early.
+Prevent surprises by highlighting tasks that could become risks if ignored.
+
+Expose dependencies and sequencing.
+Clarify what should happen now vs. next vs. later.
+
+Favor clarity and reduction of cognitive load.
+Turn vague or ambiguous items into crisp, actionable units of work.
+
+Be proactively helpful.
+If there's missing context, unclear scope, or signals of risk, gently call attention to it.
+
+When answering queries or selecting context documents:
+
+Focus on the tasks that most influence delivery, risk, quality, or momentum.
+
+Return only the most relevant information, avoiding noise.
+
+Do not invent details or make assumptions beyond what is given.
+
+Offer concise reasoning when ranking or prioritizing items.
+
+Your goal is to help the user stay organized, avoid last-minute surprises, and maintain smooth forward progress across all levels of work.`;
+
+// ========================================
 // Application State
 // ========================================
 const state = {
@@ -15,6 +62,7 @@ const state = {
   movingTask: null, // Track task being moved to another folder
   moveSelectedParent: null, // Track selected parent in move modal
   contextMenuTask: null, // Track task for context menu
+  textContextTarget: null, // Track input/textarea for text context menu
   timelineZoom: 1.0, // Timeline zoom level (1.0 = 100%)
   timelineCommits: [], // Current commits being displayed on timeline
   activeFilters: new Set(['all']), // Track active filters
@@ -25,13 +73,13 @@ const state = {
   globalHotkey: 'CommandOrControl+Alt+T', // Global hotkey for quick add (Electron accelerator format)
   autoLaunch: true, // Launch on Windows startup (default enabled)
   startMinimized: true, // Start minimized to tray (default enabled)
-  ollamaPath: null, // Path to ollama executable
-  ollamaModel: null, // Selected ollama model
+  ollamaUrl: 'http://localhost:11434', // Ollama HTTP API URL
+  ollamaPath: null, // Deprecated - keeping for backwards compat
+  ollamaModel: null, // Selected ollama model for chat
+  ollamaEmbeddingModel: null, // Selected ollama model for embeddings
+  ollamaSystemPrompt: null, // Custom system prompt for AI agent (null = use default)
   ollamaAvailable: false, // Whether ollama is detected and working
-  vectorDbEnabled: false, // Whether vector DB is enabled
-  vectorDbUrl: 'http://localhost:8000', // Vector DB endpoint URL
-  vectorDbCollection: 'tasker_tasks', // Collection name for embeddings
-  vectorDbConnected: false, // Whether vector DB is connected and available
+  // Vector DB settings removed - now embedded and auto-configured
   gitPath: null, // Path to git executable
   gitAvailable: false, // Whether git is detected and working
   dropboxClientId: null, // Dropbox OAuth2 Client ID
@@ -135,24 +183,24 @@ const elements = {
 
   // Ollama
   ollamaPathInput: document.getElementById('ollama-path-input'),
-  browseOllamaBtn: document.getElementById('browse-ollama-btn'),
   detectOllamaBtn: document.getElementById('detect-ollama-btn'),
   ollamaModelSelect: document.getElementById('ollama-model-select'),
   ollamaModelSection: document.getElementById('ollama-model-section'),
+  ollamaEmbeddingModelSelect: document.getElementById('ollama-embedding-model-select'),
+  ollamaEmbeddingModelSection: document.getElementById('ollama-embedding-model-section'),
   refreshModelsBtn: document.getElementById('refresh-models-btn'),
   ollamaStatus: document.getElementById('ollama-status'),
   ollamaStatusIcon: document.getElementById('ollama-status-icon'),
   ollamaStatusText: document.getElementById('ollama-status-text'),
+  ollamaSystemPrompt: document.getElementById('ollama-system-prompt'),
+  ollamaSystemPromptSection: document.getElementById('ollama-system-prompt-section'),
+  resetSystemPromptBtn: document.getElementById('reset-system-prompt-btn'),
 
-  // Vector DB
-  vectorDbEnabled: document.getElementById('vector-db-enabled'),
-  vectorDbConfig: document.getElementById('vector-db-config'),
-  vectorDbUrl: document.getElementById('vector-db-url'),
-  vectorDbCollection: document.getElementById('vector-db-collection'),
-  testVectorDbBtn: document.getElementById('test-vector-db-btn'),
-  vectorDbStatus: document.getElementById('vector-db-status'),
-  vectorDbStatusIcon: document.getElementById('vector-db-status-icon'),
-  vectorDbStatusText: document.getElementById('vector-db-status-text'),
+  // Embeddings Status
+  embeddingsStatus: document.getElementById('embeddings-status'),
+  embeddingsStatusIcon: document.getElementById('embeddings-status-icon'),
+  embeddingsStatusText: document.getElementById('embeddings-status-text'),
+  regenerateEmbeddingsBtn: document.getElementById('regenerate-embeddings-btn'),
 
   // Git
   gitPathInput: document.getElementById('git-path-input'),
@@ -241,6 +289,7 @@ const elements = {
   // Agent
   sidebarAgent: document.getElementById('sidebar-agent'),
   agentResizeHandle: document.getElementById('agent-resize-handle'),
+  agentChat: document.getElementById('agent-chat'),
   agentMessages: document.getElementById('agent-messages'),
   agentInput: document.getElementById('agent-input'),
   agentSendBtn: document.getElementById('agent-send-btn'),
@@ -264,7 +313,8 @@ const elements = {
   commitRollbackBtn: document.getElementById('commit-rollback-btn'),
 
   // Context Menu
-  taskContextMenu: document.getElementById('task-context-menu')
+  taskContextMenu: document.getElementById('task-context-menu'),
+  textContextMenu: document.getElementById('text-context-menu')
 };
 
 // ========================================
@@ -326,6 +376,9 @@ async function navigateToView(viewName) {
   } else if (viewName === 'settings') {
     renderFolderList();
     renderStatusesList();
+
+    // Check embeddings status
+    await checkEmbeddingsStatus();
 
     // Detect Ollama if not already detected or loaded
     if (!state.ollamaPath) {
@@ -466,12 +519,11 @@ async function saveAllSettings() {
       autoLaunch: state.autoLaunch,
       startMinimized: state.startMinimized,
       ollamaPath: state.ollamaPath,
+      ollamaUrl: state.ollamaUrl,
       ollamaModel: state.ollamaModel,
+      ollamaEmbeddingModel: state.ollamaEmbeddingModel,
+      ollamaSystemPrompt: state.ollamaSystemPrompt,
       ollamaAvailable: state.ollamaAvailable,
-      vectorDbEnabled: state.vectorDbEnabled,
-      vectorDbUrl: state.vectorDbUrl,
-      vectorDbCollection: state.vectorDbCollection,
-      vectorDbConnected: state.vectorDbConnected,
       gitPath: state.gitPath,
       gitAvailable: state.gitAvailable,
       dropboxClientId: state.dropboxClientId,
@@ -493,6 +545,208 @@ async function saveAllSettings() {
 function getCurrentFolder() {
   if (!state.currentFolderId) return null;
   return state.taskFolders.find(f => f.id === state.currentFolderId);
+}
+
+// ========================================
+// Embeddings Helper Functions
+// ========================================
+
+/**
+ * Check if embeddings are enabled for the current folder
+ * @returns {boolean}
+ */
+function areEmbeddingsEnabled() {
+  // Embeddings are now always enabled for all folders (using embedded ChromaDB)
+  return true;
+}
+
+/**
+ * Generate text representation of a task for embeddings
+ * @param {Object} task - Task object
+ * @returns {string}
+ */
+function generateTaskText(task) {
+  const parts = [];
+
+  if (task.title) {
+    parts.push(task.title);
+  }
+
+  if (task.details || task.body) {
+    parts.push(task.details || task.body);
+  }
+
+  return parts.join('\n\n').trim();
+}
+
+/**
+ * Extract metadata from a task for embeddings
+ * @param {Object} task - Task object
+ * @returns {Object}
+ */
+function extractTaskMetadata(task) {
+  return {
+    title: task.title || '',
+    details: task.details || task.body || '',
+    priority: task.priority || 'normal',
+    status: task.status || 'Pending',
+    completed: task.completed || false,
+    dueDate: task.dueDate || null,
+    created: task.created || new Date().toISOString(),
+    path: task.path || task.filePath || '',
+    folderId: state.currentFolderId
+  };
+}
+
+/**
+ * Generate and store embeddings for a task (fire-and-forget)
+ * @param {Object} task - Task object
+ */
+async function generateTaskEmbeddings(task) {
+  if (!areEmbeddingsEnabled()) {
+    return; // Embeddings not enabled, skip silently
+  }
+
+  try {
+    const taskText = generateTaskText(task);
+    if (!taskText || taskText.trim().length === 0) {
+      return; // No text content, skip
+    }
+
+    const taskId = task.path || task.filePath;
+    if (!taskId) {
+      console.warn('[Embeddings] Task ID missing, cannot generate embeddings');
+      return;
+    }
+
+    const metadata = extractTaskMetadata(task);
+
+    // Generate and store embeddings (async, don't await)
+    window.electronAPI.vectordb.storeEmbeddings(taskId, taskText, metadata).catch(err => {
+      console.error('[Embeddings] Failed to generate embeddings for task:', taskId, err);
+    });
+  } catch (error) {
+    console.error('[Embeddings] Error in generateTaskEmbeddings:', error);
+  }
+}
+
+/**
+ * Update embeddings for a task (fire-and-forget)
+ * @param {Object} task - Task object
+ */
+async function updateTaskEmbeddings(task) {
+  if (!areEmbeddingsEnabled()) {
+    return; // Embeddings not enabled, skip silently
+  }
+
+  try {
+    const taskText = generateTaskText(task);
+    if (!taskText || taskText.trim().length === 0) {
+      // No text content, delete embeddings if they exist
+      const taskId = task.path || task.filePath;
+      if (taskId) {
+        window.electronAPI.vectordb.deleteEmbeddings(taskId).catch(err => {
+          console.error('[Embeddings] Failed to delete embeddings:', err);
+        });
+      }
+      return;
+    }
+
+    const taskId = task.path || task.filePath;
+    if (!taskId) {
+      console.warn('[Embeddings] Task ID missing, cannot update embeddings');
+      return;
+    }
+
+    const metadata = extractTaskMetadata(task);
+
+    // Update embeddings (async, don't await)
+    window.electronAPI.vectordb.updateEmbeddings(taskId, taskText, metadata).catch(err => {
+      console.error('[Embeddings] Failed to update embeddings for task:', taskId, err);
+    });
+  } catch (error) {
+    console.error('[Embeddings] Error in updateTaskEmbeddings:', error);
+  }
+}
+
+/**
+ * Delete embeddings for a task (fire-and-forget)
+ * @param {string} taskPath - Task path/ID
+ */
+async function deleteTaskEmbeddings(taskPath) {
+  if (!areEmbeddingsEnabled()) {
+    return; // Embeddings not enabled, skip silently
+  }
+
+  try {
+    if (!taskPath) {
+      console.warn('[Embeddings] Task path missing, cannot delete embeddings');
+      return;
+    }
+
+    // Delete embeddings (async, don't await)
+    window.electronAPI.vectordb.deleteEmbeddings(taskPath).catch(err => {
+      console.error('[Embeddings] Failed to delete embeddings for task:', taskPath, err);
+    });
+  } catch (error) {
+    console.error('[Embeddings] Error in deleteTaskEmbeddings:', error);
+  }
+}
+
+/**
+ * Handle embeddings after a task has been moved to a new path
+ * Deletes old embeddings and generates new ones with the new path
+ * @param {string} oldPath - Original task path (used as embedding ID)
+ * @param {string} newPath - New task path after move
+ */
+async function handleTaskPathChange(oldPath, newPath) {
+  if (!areEmbeddingsEnabled()) {
+    return;
+  }
+
+  try {
+    console.log('[Embeddings] Handling path change from', oldPath, 'to', newPath);
+
+    // Delete embeddings at the old path
+    await deleteTaskEmbeddings(oldPath);
+
+    // Also delete any embeddings that might already exist at the new path
+    // (in case the task was previously at this location)
+    await deleteTaskEmbeddings(newPath);
+
+    // Find the task at the new path in the task tree
+    const movedTask = findTaskByPath(state.tasks, newPath);
+    if (movedTask) {
+      // Generate fresh embeddings with the new path as ID
+      // Important: Use newPath directly as ID, not movedTask.filePath
+      // This ensures we use the correct path even if the task object has stale data
+      const text = `${movedTask.title}\n${movedTask.body || ''}`.trim();
+      const metadata = {
+        title: movedTask.title,
+        body: movedTask.body || '',
+        priority: movedTask.priority,
+        dueDate: movedTask.dueDate,
+        status: movedTask.status
+      };
+
+      const result = await window.electronAPI.vectordb.storeEmbeddings(
+        newPath,  // Use newPath directly as ID
+        text,
+        metadata
+      );
+
+      if (result.success) {
+        console.log('[Embeddings] Updated embeddings for moved task at:', newPath);
+      } else {
+        console.error('[Embeddings] Failed to update embeddings:', result.error);
+      }
+    } else {
+      console.warn('[Embeddings] Could not find task at new path:', newPath);
+      console.warn('[Embeddings] Embeddings will be regenerated on next edit');
+    }
+  } catch (error) {
+    console.error('[Embeddings] Error handling task path change:', error);
+  }
 }
 
 function openAddFolderModal() {
@@ -663,7 +917,8 @@ async function saveAddFolder() {
       name: folderName,
       path: actualPath,
       storageType: storageType,
-      versionControl: enableVersionControl && state.gitPath ? true : false
+      versionControl: enableVersionControl && state.gitPath ? true : false,
+      embeddingsEnabled: true // Embeddings are always enabled (automatic)
     };
 
     // Add dropboxPath for Dropbox folders
@@ -677,6 +932,7 @@ async function saveAddFolder() {
     saveFoldersToStorage();
     renderSidebarFolders();
     renderFolderList();
+
     await loadTasks();
 
     closeAddFolderModal();
@@ -1070,16 +1326,20 @@ async function handleFolderDrop(e) {
       // Get task info before move
       const draggedTask = findTaskByPath(state.tasks, state.draggedTask.path);
       const taskTitle = draggedTask ? draggedTask.title : 'Unknown task';
+      const oldPath = state.draggedTask.path;
 
       // Move task to target folder root (no parent)
       const result = await window.electronAPI.tasks.moveToFolder(
-        state.draggedTask.path,
+        oldPath,
         targetFolderId,
         null // No parent - move to root
       );
 
       if (result.success) {
         await loadTasks(); // Reload tasks
+
+        // Update embeddings after path change
+        await handleTaskPathChange(oldPath, result.newPath);
 
         // Commit to git if version control is enabled
         const destFolder = state.taskFolders.find(f => f.id === targetFolderId);
@@ -1786,8 +2046,29 @@ async function addTask() {
   }
 
   try {
+    // Determine parent path based on currently selected task
+    let parentPath = currentFolder.path;
+
+    if (state.lastSelectedTaskPath) {
+      // Get the selected task
+      const selectedTask = findTaskByPath(state.tasks, state.lastSelectedTaskPath);
+
+      if (selectedTask) {
+        // Get the parent of the selected task (same level as selected)
+        const selectedTaskPath = selectedTask.filePath;
+        const pathParts = selectedTaskPath.split(/[/\\]/);
+
+        // If the selected task is nested (has parent folder(s))
+        if (pathParts.length > 1) {
+          // Remove the filename to get parent path
+          parentPath = pathParts.slice(0, -1).join('/');
+        }
+        // else: selected task is at root level, use currentFolder.path
+      }
+    }
+
     const result = await window.electronAPI.tasks.create(
-      currentFolder.path,
+      parentPath,
       taskText,
       ''
     );
@@ -1801,6 +2082,13 @@ async function addTask() {
       loadTasks().catch(err => {
         console.error('Error loading tasks:', err);
       });
+
+      // Generate embeddings for new task (fire-and-forget, don't block UI)
+      if (result.task) {
+        generateTaskEmbeddings(result.task).catch(err => {
+          console.error('Error generating embeddings:', err);
+        });
+      }
 
       // Commit to git asynchronously (fire-and-forget, don't block UI)
       commitTaskChange(`Create task: ${taskText}`).catch(err => {
@@ -1871,6 +2159,14 @@ async function deleteTask(taskPath, isDeleted, forcePermDelete = false) {
       commitMessage = `Delete task: ${taskTitle}`;
     }
 
+    // Delete embeddings for both soft and permanent deletes (fire-and-forget, don't block UI)
+    // For soft deletes: deleted tasks shouldn't be searchable via embeddings
+    // For permanent deletes: embeddings are removed completely
+    // Note: When restoring a soft-deleted task, handleTaskPathChange will generate new embeddings
+    deleteTaskEmbeddings(taskPath).catch(err => {
+      console.error('Error deleting embeddings:', err);
+    });
+
     if (result.success) {
       await loadTasks();
 
@@ -1910,11 +2206,15 @@ async function restoreTask(taskPath) {
     // Get task info for commit message before restoration
     const task = findTaskByPath(state.tasks, taskPath);
     const taskTitle = task ? task.title : 'Unknown task';
+    const oldPath = taskPath;
 
-    const result = await window.electronAPI.tasks.restore(taskPath);
+    const result = await window.electronAPI.tasks.restore(oldPath);
 
     if (result.success) {
       await loadTasks();
+
+      // Update embeddings after path change
+      await handleTaskPathChange(oldPath, result.restoredPath);
 
       // Commit to git if version control is enabled
       await commitTaskChange(`Restore task: ${taskTitle}`);
@@ -1940,6 +2240,91 @@ async function toggleTask(taskPath, currentCompleted) {
 
     if (result.success) {
       await loadTasks();
+
+      // Update embeddings with new task data (fire-and-forget, don't block UI)
+      if (result.task) {
+        updateTaskEmbeddings(result.task).catch(err => {
+          console.error('Error updating embeddings:', err);
+        });
+      }
+
+      // Reorder tasks: put completed tasks at bottom, incomplete at top
+      const parentPath = taskPath.split(/[/\\]/).slice(0, -1).join('/');
+      const siblings = findTasksAtPath(state.tasks, parentPath);
+
+      if (siblings && siblings.length > 1) {
+        // Separate incomplete and completed tasks, maintaining current order within each group
+        const incomplete = [];
+        const completed = [];
+
+        for (const sibling of siblings) {
+          if (sibling.completed) {
+            completed.push(sibling);
+          } else {
+            incomplete.push(sibling);
+          }
+        }
+
+        // Combine: incomplete first, then completed
+        const reorderedSiblings = [...incomplete, ...completed];
+
+        // Extract filenames for reorder API
+        const newOrder = reorderedSiblings.map(t => {
+          const parts = t.filePath.split(/[/\\]/);
+          return parts[parts.length - 1];
+        });
+
+        // Call reorder API
+        await window.electronAPI.tasks.reorder(parentPath, newOrder);
+        await loadTasks();
+      }
+
+      // After completing a task, select the nearest incomplete task
+      if (!currentCompleted) { // Task was just marked complete
+        // Reload siblings after reordering
+        const updatedSiblings = findTasksAtPath(state.tasks, parentPath);
+
+        if (updatedSiblings) {
+          // Find the completed task's new position
+          const completedTaskIndex = updatedSiblings.findIndex(t =>
+            normalizePath(t.filePath) === normalizePath(taskPath)
+          );
+
+          // Find nearest incomplete task (try below first, then above)
+          let nextTaskToSelect = null;
+
+          // Look for incomplete task below
+          for (let i = completedTaskIndex + 1; i < updatedSiblings.length; i++) {
+            if (!updatedSiblings[i].completed) {
+              nextTaskToSelect = updatedSiblings[i];
+              break;
+            }
+          }
+
+          // If no incomplete task below, look above
+          if (!nextTaskToSelect) {
+            for (let i = completedTaskIndex - 1; i >= 0; i--) {
+              if (!updatedSiblings[i].completed) {
+                nextTaskToSelect = updatedSiblings[i];
+                break;
+              }
+            }
+          }
+
+          // Update selection
+          if (nextTaskToSelect) {
+            state.selectedTaskPaths = [nextTaskToSelect.filePath];
+            state.lastSelectedTaskPath = nextTaskToSelect.filePath;
+          } else {
+            // No incomplete tasks remain, clear selection
+            state.selectedTaskPaths = [];
+            state.lastSelectedTaskPath = null;
+          }
+
+          // Re-render to show new selection
+          renderTasks();
+        }
+      }
 
       // Commit to git asynchronously (fire-and-forget, don't block UI)
       const action = !currentCompleted ? 'Complete' : 'Uncomplete';
@@ -2049,6 +2434,14 @@ function enableInlineEdit(textElement) {
       try {
         await window.electronAPI.tasks.update(taskPath, { title: newText });
         await loadTasks();
+
+        // Update embeddings with new task title (fire-and-forget, don't block UI)
+        const updatedTask = findTaskByPath(state.tasks, taskPath);
+        if (updatedTask) {
+          updateTaskEmbeddings(updatedTask).catch(err => {
+            console.error('Error updating embeddings:', err);
+          });
+        }
 
         // Commit to git asynchronously (fire-and-forget, don't block UI)
         commitTaskChange(`Update task: ${newText}`).catch(err => {
@@ -2291,6 +2684,14 @@ async function saveTaskModal() {
       closeTaskModal();
       await loadTasks();
 
+      // Update embeddings with new task data (fire-and-forget, don't block UI)
+      const updatedTask = findTaskByPath(state.tasks, state.editingTask.filePath);
+      if (updatedTask) {
+        updateTaskEmbeddings(updatedTask).catch(err => {
+          console.error('Error updating embeddings:', err);
+        });
+      }
+
       // Commit to git if version control is enabled
       await commitTaskChange(`Update task: ${updates.title}`);
     } else {
@@ -2441,8 +2842,9 @@ async function confirmMoveTask() {
   }
 
   try {
+    const oldPath = taskFilePath;
     const result = await window.electronAPI.tasks.moveToFolder(
-      taskFilePath,
+      oldPath,
       destinationFolderId,
       destinationParentPath
     );
@@ -2451,6 +2853,9 @@ async function confirmMoveTask() {
       closeMoveTaskModal();
       closeTaskModal(); // Close the task details modal too
       await loadTasks(); // Reload tasks
+
+      // Update embeddings after path change
+      await handleTaskPathChange(oldPath, result.newPath);
 
       // Commit to git if version control is enabled
       const destFolder = state.taskFolders.find(f => f.id === destinationFolderId);
@@ -2683,6 +3088,16 @@ function matchesFilters(task) {
 }
 
 function sortTasks(tasks) {
+  // For default sort, preserve positional order (no sorting)
+  // This allows manual repositioning to work properly
+  if (state.sortOrder === 'default') {
+    // Just recursively apply to children, but don't sort at this level
+    return tasks.map(task => ({
+      ...task,
+      children: task.children && task.children.length > 0 ? sortTasks(task.children) : task.children
+    }));
+  }
+
   // Create a copy to avoid mutating original
   const sorted = [...tasks];
 
@@ -2701,26 +3116,8 @@ function sortTasks(tasks) {
     } else if (state.sortOrder === 'created') {
       // Sort by creation date (oldest first)
       return new Date(a.created) - new Date(b.created);
-    } else {
-      // Default: priority -> due date -> creation date
-      // First by priority
-      if (a.priority === 'high' && b.priority !== 'high') return -1;
-      if (a.priority !== 'high' && b.priority === 'high') return 1;
-
-      // Then by due date (earliest first)
-      if (!a.dueDate && !b.dueDate) {
-        // Both have no due date, sort by creation date
-        return new Date(a.created) - new Date(b.created);
-      }
-      if (!a.dueDate) return 1; // a has no due date, put it after
-      if (!b.dueDate) return -1; // b has no due date, put it after
-
-      const dueDateDiff = new Date(a.dueDate) - new Date(b.dueDate);
-      if (dueDateDiff !== 0) return dueDateDiff;
-
-      // If due dates are equal, sort by creation date
-      return new Date(a.created) - new Date(b.created);
     }
+    return 0;
   });
 
   // Recursively sort children
@@ -2971,6 +3368,229 @@ function navigateTasksHorizontal(direction, shiftKey = false) {
   }
 }
 
+// ========================================
+// Keyboard Hierarchy Navigation Helpers
+// ========================================
+
+async function promoteTask(taskPath) {
+  try {
+    // Get parent directory path using native path separator from original path
+    const pathSep = taskPath.includes('\\') ? '\\' : '/';
+    const pathParts = taskPath.split(/[/\\]/);
+    const parentDir = pathParts.slice(0, -1).join(pathSep);
+
+    // Check if already at root
+    const currentFolder = getCurrentFolder();
+    if (!currentFolder) return;
+
+    if (normalizePath(parentDir) === normalizePath(currentFolder.path)) {
+      console.log('[Promote] Already at root level');
+      return;
+    }
+
+    // Find the parent task path (the .md file for the parent directory)
+    const parentTaskPath = parentDir + '.md';
+
+    console.log('[Promote] Looking for parent task at:', parentTaskPath);
+    console.log('[Promote] Current task path:', taskPath);
+    console.log('[Promote] Parent dir:', parentDir);
+
+    // Check if parent task exists
+    const parentTask = findTaskByPath(state.tasks, parentTaskPath);
+    if (!parentTask) {
+      console.log('[Promote] Cannot find parent task');
+      console.log('[Promote] Available tasks:', state.tasks.length);
+      return;
+    }
+
+    console.log('[Promote] Found parent task:', parentTask.title);
+    console.log('[Promote] Promoting task to same level as parent');
+
+    const oldPath = taskPath;
+    const task = findTaskByPath(state.tasks, taskPath);
+    const taskTitle = task ? task.title : 'task';
+    const parentTitle = parentTask.title;
+
+    // Move to be a sibling of the parent
+    const result = await window.electronAPI.tasks.moveToSibling(oldPath, parentTaskPath);
+
+    if (result.success) {
+      await loadTasks();
+      await handleTaskPathChange(oldPath, result.newPath);
+      await commitTaskChange(`Promote "${taskTitle}" to same level as "${parentTitle}"`);
+
+      // Update selection to the new path
+      state.selectedTaskPaths = [result.newPath];
+      state.lastSelectedTaskPath = result.newPath;
+
+      // Re-render to show selection and scroll into view
+      renderTasks();
+    }
+  } catch (error) {
+    console.error('[Promote] Error:', error);
+  }
+}
+
+async function nestTaskIntoAbove(taskPath) {
+  try {
+    // Find the task above this one at the same level
+    const parentPath = taskPath.split(/[/\\]/).slice(0, -1).join('/');
+    const siblings = findTasksAtPath(state.tasks, parentPath);
+
+    if (!siblings) {
+      console.log('[Nest] Cannot find siblings');
+      return;
+    }
+
+    // Find current task index
+    const currentIndex = siblings.findIndex(t => normalizePath(t.filePath) === normalizePath(taskPath));
+    if (currentIndex === -1 || currentIndex === 0) {
+      console.log('[Nest] Already at top or task not found');
+      return;
+    }
+
+    // Get the task above
+    const taskAbove = siblings[currentIndex - 1];
+
+    console.log('[Nest] Nesting into task above');
+
+    const oldPath = taskPath;
+    const task = findTaskByPath(state.tasks, taskPath);
+    const taskTitle = task ? task.title : 'task';
+    const targetTitle = taskAbove.title;
+
+    // Move to be a child of the task above
+    const result = await window.electronAPI.tasks.moveToParent(oldPath, taskAbove.filePath);
+
+    if (result.success) {
+      // Expand the parent to show the nested task
+      state.expandedTasks.add(taskAbove.id);
+
+      await loadTasks();
+      await handleTaskPathChange(oldPath, result.newPath);
+      await commitTaskChange(`Nest "${taskTitle}" into "${targetTitle}"`);
+
+      // Update selection to the new path
+      state.selectedTaskPaths = [result.newPath];
+      state.lastSelectedTaskPath = result.newPath;
+
+      // Re-render to show selection and scroll into view
+      renderTasks();
+    }
+  } catch (error) {
+    console.error('[Nest] Error:', error);
+  }
+}
+
+async function moveTaskUpOnePosition(taskPath) {
+  try {
+    // Find siblings at the same level
+    const parentPath = taskPath.split(/[/\\]/).slice(0, -1).join('/');
+    const siblings = findTasksAtPath(state.tasks, parentPath);
+
+    if (!siblings || siblings.length < 2) {
+      console.log('[Move Up] Cannot move - not enough siblings');
+      return;
+    }
+
+    // Find current task index
+    const currentIndex = siblings.findIndex(t => normalizePath(t.filePath) === normalizePath(taskPath));
+    if (currentIndex === -1 || currentIndex === 0) {
+      console.log('[Move Up] Already at top');
+      return;
+    }
+
+    console.log('[Move Up] Moving task up one position');
+
+    // Get filenames in current order
+    const pathSep = taskPath.includes('\\') ? '\\' : '/';
+    const currentOrder = siblings.map(t => {
+      const parts = t.filePath.split(/[/\\]/);
+      return parts[parts.length - 1];
+    });
+
+    // Swap with task above
+    [currentOrder[currentIndex], currentOrder[currentIndex - 1]] =
+    [currentOrder[currentIndex - 1], currentOrder[currentIndex]];
+
+    // Reorder
+    const result = await window.electronAPI.tasks.reorder(parentPath, currentOrder);
+
+    if (result.success) {
+      await loadTasks();
+      const task = findTaskByPath(state.tasks, taskPath);
+      if (task) {
+        await commitTaskChange(`Move "${task.title}" up`);
+      }
+
+      // Maintain selection on the same task
+      state.selectedTaskPaths = [taskPath];
+      state.lastSelectedTaskPath = taskPath;
+
+      // Re-render to show selection and scroll into view
+      renderTasks();
+    }
+  } catch (error) {
+    console.error('[Move Up] Error:', error);
+  }
+}
+
+async function moveTaskDownOnePosition(taskPath) {
+  try {
+    // Find siblings at the same level
+    const parentPath = taskPath.split(/[/\\]/).slice(0, -1).join('/');
+    const siblings = findTasksAtPath(state.tasks, parentPath);
+
+    if (!siblings || siblings.length < 2) {
+      console.log('[Move Down] Cannot move - not enough siblings');
+      return;
+    }
+
+    // Find current task index
+    const currentIndex = siblings.findIndex(t => normalizePath(t.filePath) === normalizePath(taskPath));
+    if (currentIndex === -1 || currentIndex === siblings.length - 1) {
+      console.log('[Move Down] Already at bottom');
+      return;
+    }
+
+    console.log('[Move Down] Moving task down one position');
+
+    // Get filenames in current order
+    const currentOrder = siblings.map(t => {
+      const parts = t.filePath.split(/[/\\]/);
+      return parts[parts.length - 1];
+    });
+
+    // Swap with task below
+    [currentOrder[currentIndex], currentOrder[currentIndex + 1]] =
+    [currentOrder[currentIndex + 1], currentOrder[currentIndex]];
+
+    // Reorder
+    const result = await window.electronAPI.tasks.reorder(parentPath, currentOrder);
+
+    if (result.success) {
+      await loadTasks();
+      const task = findTaskByPath(state.tasks, taskPath);
+      if (task) {
+        await commitTaskChange(`Move "${task.title}" down`);
+      }
+
+      // Maintain selection on the same task
+      state.selectedTaskPaths = [taskPath];
+      state.lastSelectedTaskPath = taskPath;
+
+      // Re-render to show selection and scroll into view
+      renderTasks();
+    }
+  } catch (error) {
+    console.error('[Move Down] Error:', error);
+  }
+}
+
+// ========================================
+// Keyboard Action Handler
+// ========================================
+
 function handleTaskKeyboardAction(action) {
   if (state.selectedTaskPaths.length === 0) return;
 
@@ -3036,6 +3656,34 @@ function handleTaskKeyboardAction(action) {
         if (task) {
           deleteTask(taskPath, task.deleted, true);
         }
+      }
+      break;
+
+    case 'promote':
+      // [: Promote task one level (move to parent's level)
+      if (state.lastSelectedTaskPath) {
+        promoteTask(state.lastSelectedTaskPath);
+      }
+      break;
+
+    case 'nest-into-above':
+      // ]: Nest task into the item above it at the same level
+      if (state.lastSelectedTaskPath) {
+        nestTaskIntoAbove(state.lastSelectedTaskPath);
+      }
+      break;
+
+    case 'move-up':
+      // ;: Move task up one position at same level
+      if (state.lastSelectedTaskPath) {
+        moveTaskUpOnePosition(state.lastSelectedTaskPath);
+      }
+      break;
+
+    case 'move-down':
+      // ': Move task down one position at same level
+      if (state.lastSelectedTaskPath) {
+        moveTaskDownOnePosition(state.lastSelectedTaskPath);
       }
       break;
   }
@@ -3321,40 +3969,83 @@ async function handleDrop(e) {
   const rect = taskItem.getBoundingClientRect();
   const midpoint = rect.top + rect.height / 2;
 
+  // Check if the target is the parent of the dragged task
+  const draggedParentPath = state.draggedTask.path.split(/[/\\]/).slice(0, -1).join('/');
+  const targetTaskDir = targetPath.replace('.md', '');
+  const isTargetTheParent = normalizePath(draggedParentPath) === normalizePath(targetTaskDir);
+
   try {
-    if (e.clientY < midpoint) {
-      // Drop above - move to same level as target, then reorder
+    // Special case: dragging a child onto the top edge of its parent to promote it
+    if (isTargetTheParent && e.clientY < midpoint) {
+      console.log('[Drag] Promoting child to same level as parent');
+      const oldPath = state.draggedTask.path;
+
+      // Find the parent's parent (grandparent) path
+      const parentParts = targetPath.split(/[/\\]/);
+      const grandparentPath = parentParts.slice(0, -1).join(parentParts[0].includes('\\') ? '\\' : '/');
+
+      // Move the child to be a sibling of its parent
       const moveResult = await window.electronAPI.tasks.moveToSibling(
-        state.draggedTask.path,
+        oldPath,
         targetPath
       );
 
       if (moveResult.success) {
+        console.log('[Drag] Promotion successful, new path:', moveResult.newPath);
+        await loadTasks();
+
+        // Update embeddings after path change
+        await handleTaskPathChange(oldPath, moveResult.newPath);
+
+        // Commit to git
+        await commitTaskChange(`Promote "${draggedTitle}" to same level as "${targetTitle}"`);
+      }
+    } else if (e.clientY < midpoint) {
+      // Drop above - move to same level as target, then reorder
+      console.log('[Drag] Drop ABOVE midpoint - moving to sibling');
+      const oldPath = state.draggedTask.path;
+      const moveResult = await window.electronAPI.tasks.moveToSibling(
+        oldPath,
+        targetPath
+      );
+
+      if (moveResult.success) {
+        console.log('[Drag] Move successful, new path:', moveResult.newPath);
+
+        // Reload tasks first to get the updated file structure
+        console.log('[Drag] Reloading tasks before reorder');
+        await loadTasks();
+
         // Now reorder within the new parent
         await reorderTasks(moveResult.newPath, targetPath);
 
-        // Commit to git asynchronously (fire-and-forget, don't block UI)
-        commitTaskChange(`Move task "${draggedTitle}" to sibling of "${targetTitle}"`).catch(err => {
-          console.error('Error committing task change:', err);
-        });
+        // Update embeddings after path change
+        await handleTaskPathChange(oldPath, moveResult.newPath);
+
+        // Commit to git
+        await commitTaskChange(`Move task "${draggedTitle}" to sibling of "${targetTitle}"`);
       }
     } else {
       // Drop below - make it a child
+      console.log('[Drag] Drop BELOW midpoint - making child');
+      const oldPath = state.draggedTask.path;
       const result = await window.electronAPI.tasks.moveToParent(
-        state.draggedTask.path,
+        oldPath,
         targetPath
       );
 
       if (result.success) {
+        console.log('[Drag] Move successful, new path:', result.newPath);
         // Automatically expand the parent to show the new child
         const targetId = parseInt(taskItem.dataset.taskId);
         state.expandedTasks.add(targetId);
         await loadTasks();
 
-        // Commit to git asynchronously (fire-and-forget, don't block UI)
-        commitTaskChange(`Move task "${draggedTitle}" to child of "${targetTitle}"`).catch(err => {
-          console.error('Error committing task change:', err);
-        });
+        // Update embeddings after path change
+        await handleTaskPathChange(oldPath, result.newPath);
+
+        // Commit to git
+        await commitTaskChange(`Move task "${draggedTitle}" to child of "${targetTitle}"`);
       }
     }
   } catch (error) {
@@ -3368,6 +4059,8 @@ async function handleDrop(e) {
 }
 
 async function reorderTasks(draggedPath, targetPath) {
+  console.log('[Reorder] Starting reorder - dragged:', draggedPath, 'target:', targetPath);
+
   // Get parent directory and filenames
   const draggedParts = draggedPath.split(/[/\\]/);
   const targetParts = targetPath.split(/[/\\]/);
@@ -3375,18 +4068,30 @@ async function reorderTasks(draggedPath, targetPath) {
   const draggedFilename = draggedParts[draggedParts.length - 1];
   const targetFilename = targetParts[targetParts.length - 1];
 
-  const draggedParent = draggedParts.slice(0, -1).join('/');
-  const targetParent = targetParts.slice(0, -1).join('/');
+  // Use native path separator for comparison
+  const pathSep = draggedPath.includes('\\') ? '\\' : '/';
+  const draggedParent = draggedParts.slice(0, -1).join(pathSep);
+  const targetParent = targetParts.slice(0, -1).join(pathSep);
 
-  // Only reorder if they're in the same parent
-  if (draggedParent !== targetParent) {
-    console.log('Cannot reorder - tasks in different parents');
+  console.log('[Reorder] Parent paths - dragged:', draggedParent, 'target:', targetParent);
+
+  // Only reorder if they're in the same parent (use normalized comparison)
+  if (normalizePath(draggedParent) !== normalizePath(targetParent)) {
+    console.log('[Reorder] Cannot reorder - tasks in different parents');
+    console.log('[Reorder] Normalized - dragged:', normalizePath(draggedParent));
+    console.log('[Reorder] Normalized - target:', normalizePath(targetParent));
     return;
   }
 
   // Find all tasks at this level
+  console.log('[Reorder] Finding tasks at parent path:', draggedParent);
   const parentTasks = findTasksAtPath(state.tasks, draggedParent);
-  if (!parentTasks) return;
+  if (!parentTasks) {
+    console.log('[Reorder] No parent tasks found!');
+    return;
+  }
+
+  console.log('[Reorder] Found', parentTasks.length, 'tasks at this level');
 
   // Get current order
   const currentOrder = parentTasks.map(t => {
@@ -3407,23 +4112,54 @@ async function reorderTasks(draggedPath, targetPath) {
   currentOrder.splice(targetIndex, 0, draggedFilename);
 
   // Call reorder API
+  console.log('[Reorder] Calling reorder API with order:', currentOrder);
   const result = await window.electronAPI.tasks.reorder(draggedParent, currentOrder);
 
   if (result.success) {
+    console.log('[Reorder] Reorder API succeeded, calling loadTasks()');
     await loadTasks();
+    console.log('[Reorder] loadTasks() completed, tasks should be refreshed');
+  } else {
+    console.error('[Reorder] Reorder API failed:', result.error);
   }
 }
 
+/**
+ * Normalize path for comparison (handle Windows vs Unix separators)
+ * @param {string} filePath - Path to normalize
+ * @returns {string} Normalized path with consistent separators
+ */
+function normalizePath(filePath) {
+  if (!filePath) {
+    return '';
+  }
+  // Convert all backslashes to forward slashes for consistent comparison
+  return filePath.replace(/\\/g, '/').toLowerCase();
+}
+
 function findTasksAtPath(tasks, parentPath) {
-  // If parentPath is the root tasks path, return root tasks
-  if (parentPath === state.tasksPath) {
+  const normalizedParentPath = normalizePath(parentPath);
+
+  // Get the current folder's path
+  const currentFolder = getCurrentFolder();
+  const currentFolderPath = currentFolder ? currentFolder.path : '';
+  const normalizedCurrentFolderPath = normalizePath(currentFolderPath);
+
+  console.log('[findTasksAtPath] Looking for parent:', normalizedParentPath);
+  console.log('[findTasksAtPath] Current folder path:', normalizedCurrentFolderPath);
+
+  // If parentPath is the root tasks path (current folder root), return root tasks
+  if (normalizedParentPath === normalizedCurrentFolderPath) {
+    console.log('[findTasksAtPath] Returning root tasks:', tasks.length, 'tasks');
     return tasks;
   }
 
   // Otherwise search recursively
   for (const task of tasks) {
     const taskDir = task.filePath.replace('.md', '');
-    if (taskDir === parentPath && task.children) {
+    const normalizedTaskDir = normalizePath(taskDir);
+
+    if (normalizedTaskDir === normalizedParentPath && task.children) {
       return task.children;
     }
     if (task.children && task.children.length > 0) {
@@ -3955,8 +4691,8 @@ function setupKeyboardShortcuts() {
       return;
     }
 
-    // Only block Space, Enter, Delete when in text input fields (except task input) or contenteditable elements
-    const isInTextInput = e.target.matches('input:not(#taskInput):not([type="checkbox"]), textarea:not(#taskInput), [contenteditable="true"]');
+    // Only block Space, Enter, Delete when in text input fields or contenteditable elements
+    const isInTextInput = e.target.matches('input:not([type="checkbox"]), textarea, [contenteditable="true"]');
 
     switch (e.key) {
       case ' ':
@@ -3981,6 +4717,34 @@ function setupKeyboardShortcuts() {
           } else {
             handleTaskKeyboardAction('delete');
           }
+        }
+        break;
+
+      case '[':
+        if (!isInTextInput) {
+          e.preventDefault();
+          handleTaskKeyboardAction('promote');
+        }
+        break;
+
+      case ']':
+        if (!isInTextInput) {
+          e.preventDefault();
+          handleTaskKeyboardAction('nest-into-above');
+        }
+        break;
+
+      case ';':
+        if (!isInTextInput) {
+          e.preventDefault();
+          handleTaskKeyboardAction('move-up');
+        }
+        break;
+
+      case "'":
+        if (!isInTextInput) {
+          e.preventDefault();
+          handleTaskKeyboardAction('move-down');
         }
         break;
     }
@@ -4064,54 +4828,78 @@ function updateOllamaStatus(icon, text, type = 'info') {
 
 async function detectOllama() {
   try {
-    updateOllamaStatus('⏳', 'Detecting Ollama...', 'info');
+    updateOllamaStatus('⏳', 'Testing connection...', 'info');
 
-    const result = await window.electronAPI.ollama.detect();
+    // Get URL from input or use saved state
+    const url = elements.ollamaPathInput.value.trim() || state.ollamaUrl;
+
+    const result = await window.electronAPI.ollama.detect(url);
 
     if (result.success) {
-      state.ollamaPath = result.path;
+      state.ollamaUrl = url;
+      state.ollamaPath = url; // Backwards compat
       state.ollamaAvailable = true;
 
-      if (elements.ollamaPathInput) {
-        elements.ollamaPathInput.value = result.path;
-      }
+      updateOllamaStatus('✓', `Connected: ${result.version}`, 'success');
 
-      updateOllamaStatus('✓', `Ollama found: ${result.version}`, 'success');
-
-      // Now load available models
-      await listOllamaModels(result.path);
+      // Load available models
+      await listOllamaModels();
     } else {
-      state.ollamaPath = null;
       state.ollamaAvailable = false;
 
-      if (elements.ollamaPathInput) {
-        elements.ollamaPathInput.value = '';
-        elements.ollamaPathInput.placeholder = 'Not found - click Browse or Detect';
-      }
+      updateOllamaStatus('✗', result.error || 'Cannot connect to Ollama', 'error');
 
-      updateOllamaStatus('✗', result.error || 'Ollama not found', 'error');
-
-      // Hide model section
+      // Hide model sections
       if (elements.ollamaModelSection) {
         elements.ollamaModelSection.style.display = 'none';
+      }
+      if (elements.ollamaEmbeddingModelSection) {
+        elements.ollamaEmbeddingModelSection.style.display = 'none';
       }
     }
 
     await saveAllSettings();
   } catch (error) {
-    console.error('Error detecting Ollama:', error);
-    updateOllamaStatus('✗', 'Error detecting Ollama', 'error');
+    console.error('Error testing Ollama connection:', error);
+    updateOllamaStatus('✗', 'Error connecting to Ollama', 'error');
   }
 }
 
-async function listOllamaModels(ollamaPath) {
+async function listOllamaModels() {
   try {
     updateOllamaStatus('⏳', 'Loading models...', 'info');
 
-    const result = await window.electronAPI.ollama.listModels(ollamaPath);
+    console.log('[listOllamaModels] About to call IPC with URL:', state.ollamaUrl);
+
+    // Use configured URL
+    const result = await window.electronAPI.ollama.listModels(state.ollamaUrl);
+
+    console.log('[listOllamaModels] IPC call returned:', result);
+    console.log('[listOllamaModels] Models:', result.models);
 
     if (result.success && result.models && result.models.length > 0) {
-      // Populate model dropdown
+      // Filter models by type
+      // Embedding models typically have these patterns in their names
+      const embeddingModels = result.models.filter(model => {
+        const lowerModel = model.toLowerCase();
+        return lowerModel.includes('embed') ||     // nomic-embed-text, mxbai-embed-large
+               lowerModel.includes('minilm') ||    // all-minilm
+               lowerModel.includes('sentence') ||  // sentence-transformers models
+               lowerModel.includes('e5-');         // e5-small, e5-base, e5-large
+      });
+      const chatModels = result.models.filter(model => {
+        const lowerModel = model.toLowerCase();
+        return !(lowerModel.includes('embed') ||
+                 lowerModel.includes('minilm') ||
+                 lowerModel.includes('sentence') ||
+                 lowerModel.includes('e5-'));
+      });
+
+      console.log('[listOllamaModels] Filtered models:');
+      console.log('[listOllamaModels] - Chat models:', chatModels);
+      console.log('[listOllamaModels] - Embedding models:', embeddingModels);
+
+      // Populate chat model dropdown (exclude embedding models)
       if (elements.ollamaModelSelect) {
         elements.ollamaModelSelect.innerHTML = '';
 
@@ -4121,8 +4909,8 @@ async function listOllamaModels(ollamaPath) {
         defaultOption.textContent = 'Select a model...';
         elements.ollamaModelSelect.appendChild(defaultOption);
 
-        // Add models
-        result.models.forEach(model => {
+        // Add chat models only
+        chatModels.forEach(model => {
           const option = document.createElement('option');
           option.value = model;
           option.textContent = model;
@@ -4130,61 +4918,58 @@ async function listOllamaModels(ollamaPath) {
         });
 
         // Select previously saved model if available
-        if (state.ollamaModel && result.models.includes(state.ollamaModel)) {
+        if (state.ollamaModel && chatModels.includes(state.ollamaModel)) {
           elements.ollamaModelSelect.value = state.ollamaModel;
         }
       }
 
-      // Show model section
+      // Populate embedding model dropdown (only embedding models)
+      if (elements.ollamaEmbeddingModelSelect) {
+        elements.ollamaEmbeddingModelSelect.innerHTML = '';
+
+        // Add default option
+        const defaultEmbedOption = document.createElement('option');
+        defaultEmbedOption.value = '';
+        defaultEmbedOption.textContent = 'Select an embedding model...';
+        elements.ollamaEmbeddingModelSelect.appendChild(defaultEmbedOption);
+
+        // Add embedding models only
+        embeddingModels.forEach(model => {
+          const option = document.createElement('option');
+          option.value = model;
+          option.textContent = model;
+          elements.ollamaEmbeddingModelSelect.appendChild(option);
+        });
+
+        // Select previously saved embedding model if available
+        if (state.ollamaEmbeddingModel && embeddingModels.includes(state.ollamaEmbeddingModel)) {
+          elements.ollamaEmbeddingModelSelect.value = state.ollamaEmbeddingModel;
+        }
+      }
+
+      // Show model sections
       if (elements.ollamaModelSection) {
         elements.ollamaModelSection.style.display = 'block';
       }
+      if (elements.ollamaEmbeddingModelSection) {
+        elements.ollamaEmbeddingModelSection.style.display = 'block';
+      }
 
-      updateOllamaStatus('✓', `Found ${result.models.length} model(s)`, 'success');
+      updateOllamaStatus('✓', `Found ${chatModels.length} chat model(s) and ${embeddingModels.length} embedding model(s)`, 'success');
     } else {
       updateOllamaStatus('⚠', 'No models found. Run "ollama pull" to download models.', 'error');
 
-      // Hide model section
+      // Hide model sections
       if (elements.ollamaModelSection) {
         elements.ollamaModelSection.style.display = 'none';
+      }
+      if (elements.ollamaEmbeddingModelSection) {
+        elements.ollamaEmbeddingModelSection.style.display = 'none';
       }
     }
   } catch (error) {
     console.error('Error listing models:', error);
     updateOllamaStatus('✗', 'Error loading models', 'error');
-  }
-}
-
-async function browseForOllama() {
-  try {
-    const filePath = await window.electronAPI.ollama.selectFile();
-
-    if (filePath) {
-      // Verify this is actually ollama by trying to run it
-      updateOllamaStatus('⏳', 'Verifying executable...', 'info');
-
-      state.ollamaPath = filePath;
-
-      if (elements.ollamaPathInput) {
-        elements.ollamaPathInput.value = filePath;
-      }
-
-      // Try to list models to verify it works
-      const result = await window.electronAPI.ollama.listModels(filePath);
-
-      if (result.success) {
-        state.ollamaAvailable = true;
-        await listOllamaModels(filePath);
-      } else {
-        state.ollamaAvailable = false;
-        updateOllamaStatus('✗', 'Invalid Ollama executable', 'error');
-      }
-
-      await saveAllSettings();
-    }
-  } catch (error) {
-    console.error('Error browsing for Ollama:', error);
-    updateOllamaStatus('✗', 'Error selecting file', 'error');
   }
 }
 
@@ -4204,17 +4989,159 @@ async function handleOllamaModelChange(event) {
   await saveAllSettings();
 }
 
-async function refreshOllamaModels() {
-  if (!state.ollamaPath) {
-    updateOllamaStatus('⚠', 'No Ollama path configured. Please detect or browse for Ollama first.', 'error');
-    return;
-  }
+async function handleOllamaEmbeddingModelChange(event) {
+  const oldEmbeddingModel = state.ollamaEmbeddingModel;
+  state.ollamaEmbeddingModel = event.target.value;
+  await saveAllSettings();
 
+  // If both URL and embedding model are configured, reinitialize embeddings
+  if (state.ollamaUrl && state.ollamaEmbeddingModel && oldEmbeddingModel !== state.ollamaEmbeddingModel) {
+    console.log('[Embeddings] Embedding model changed, reinitializing...');
+    await reinitializeEmbeddings();
+  }
+}
+
+async function reinitializeEmbeddings() {
   try {
-    await listOllamaModels(state.ollamaPath);
+    // Update status indicator to show "Reinitializing..."
+    elements.embeddingsStatusIcon.textContent = 'sync';
+    elements.embeddingsStatusIcon.style.color = 'var(--accent-primary)';
+    elements.embeddingsStatusText.textContent = 'Reinitializing embeddings database...';
+    elements.embeddingsStatus.style.background = 'var(--bg-secondary)';
+    elements.embeddingsStatus.style.borderColor = 'var(--accent-primary)';
+
+    console.log('[Embeddings] Calling vectordb.reinitialize with:', {
+      ollamaUrl: state.ollamaUrl,
+      embeddingModel: state.ollamaEmbeddingModel
+    });
+
+    // Call IPC to reinitialize embeddings
+    const result = await window.electronAPI.vectordb.reinitialize(
+      state.ollamaUrl,
+      state.ollamaEmbeddingModel
+    );
+
+    if (result.success) {
+      console.log('[Embeddings] Reinitialization successful');
+
+      // Update status to success
+      elements.embeddingsStatusIcon.textContent = 'check_circle';
+      elements.embeddingsStatusIcon.style.color = 'var(--success)';
+      elements.embeddingsStatusText.textContent = 'Embeddings database reinitialized successfully';
+      elements.embeddingsStatus.style.background = 'var(--success-bg)';
+      elements.embeddingsStatus.style.borderColor = 'var(--success)';
+
+      // Refresh status after a short delay
+      setTimeout(async () => {
+        await checkEmbeddingsStatus();
+      }, 2000);
+    } else {
+      console.error('[Embeddings] Reinitialization failed:', result.error);
+
+      // Update status to error
+      elements.embeddingsStatusIcon.textContent = 'error';
+      elements.embeddingsStatusIcon.style.color = 'var(--danger)';
+      elements.embeddingsStatusText.textContent = `Failed to reinitialize: ${result.error}`;
+      elements.embeddingsStatus.style.background = 'var(--danger-bg)';
+      elements.embeddingsStatus.style.borderColor = 'var(--danger)';
+    }
   } catch (error) {
-    console.error('Error refreshing models:', error);
+    console.error('[Embeddings] Error during reinitialization:', error);
+
+    // Update status to error
+    elements.embeddingsStatusIcon.textContent = 'error';
+    elements.embeddingsStatusIcon.style.color = 'var(--danger)';
+    elements.embeddingsStatusText.textContent = `Error reinitializing: ${error.message}`;
+    elements.embeddingsStatus.style.background = 'var(--danger-bg)';
+    elements.embeddingsStatus.style.borderColor = 'var(--danger)';
+  }
+}
+
+async function refreshOllamaModels() {
+  try {
+    console.log('[refreshOllamaModels] Button clicked!');
+
+    // Get URL from input or use saved state
+    const url = elements.ollamaPathInput.value.trim() || state.ollamaUrl;
+
+    console.log('[refreshOllamaModels] Input field value:', elements.ollamaPathInput.value);
+    console.log('[refreshOllamaModels] Current state.ollamaUrl:', state.ollamaUrl);
+    console.log('[refreshOllamaModels] Using URL:', url);
+
+    if (!url) {
+      updateOllamaStatus('⚠', 'No Ollama URL configured. Please enter a URL first.', 'error');
+      return;
+    }
+
+    // Save old URL to detect changes
+    const oldOllamaUrl = state.ollamaUrl;
+
+    // Update state with current URL
+    state.ollamaUrl = url;
+    state.ollamaPath = url; // Backwards compat
+
+    console.log('[refreshOllamaModels] Updated state, about to call listOllamaModels()');
+
+    // Load models from the URL
+    await listOllamaModels();
+
+    console.log('[refreshOllamaModels] listOllamaModels() completed');
+
+    // Save the new URL to config
+    await saveAllSettings();
+
+    console.log('[refreshOllamaModels] Settings saved');
+
+    // If both URL and embedding model are configured, and URL changed, reinitialize embeddings
+    if (state.ollamaUrl && state.ollamaEmbeddingModel && oldOllamaUrl !== state.ollamaUrl) {
+      console.log('[Embeddings] Ollama URL changed, reinitializing...');
+      await reinitializeEmbeddings();
+    }
+  } catch (error) {
+    console.error('[refreshOllamaModels] Error:', error);
     updateOllamaStatus('✗', 'Error refreshing models', 'error');
+  }
+}
+
+/**
+ * Handle system prompt change
+ * Save to config when textarea loses focus
+ */
+async function handleSystemPromptChange() {
+  try {
+    const newPrompt = elements.ollamaSystemPrompt.value.trim();
+
+    // Store in state (empty string becomes null to use default)
+    state.ollamaSystemPrompt = newPrompt.length > 0 ? newPrompt : null;
+
+    // Save to config
+    await saveAllSettings();
+
+    console.log('[SystemPrompt] Updated system prompt');
+  } catch (error) {
+    console.error('[SystemPrompt] Error saving system prompt:', error);
+  }
+}
+
+/**
+ * Reset system prompt to default
+ */
+async function handleResetSystemPrompt() {
+  try {
+    if (!confirm('Reset AI agent system prompt to default?\n\nThis will discard any custom changes you\'ve made.')) {
+      return;
+    }
+
+    // Reset to default
+    state.ollamaSystemPrompt = null;
+    elements.ollamaSystemPrompt.value = DEFAULT_OLLAMA_SYSTEM_PROMPT;
+
+    // Save to config
+    await saveAllSettings();
+
+    console.log('[SystemPrompt] Reset to default system prompt');
+  } catch (error) {
+    console.error('[SystemPrompt] Error resetting system prompt:', error);
   }
 }
 
@@ -4222,14 +5149,13 @@ async function loadOllamaSettings() {
   const result = await window.electronAPI.config.read();
   if (result.success && result.config) {
     state.ollamaPath = result.config.ollamaPath || null;
+    state.ollamaUrl = result.config.ollamaUrl || 'http://localhost:11434';
     state.ollamaModel = result.config.ollamaModel || null;
+    state.ollamaEmbeddingModel = result.config.ollamaEmbeddingModel || null;
+    state.ollamaSystemPrompt = result.config.ollamaSystemPrompt || null;
     state.ollamaAvailable = result.config.ollamaAvailable || false;
 
-    // Load vector DB settings
-    state.vectorDbEnabled = result.config.vectorDbEnabled || false;
-    state.vectorDbUrl = result.config.vectorDbUrl || 'http://localhost:8000';
-    state.vectorDbCollection = result.config.vectorDbCollection || 'tasker_tasks';
-    state.vectorDbConnected = result.config.vectorDbConnected || false;
+    // Vector DB settings no longer needed (embedded, auto-configured)
 
     // Load quick prompts (use defaults if not saved)
     if (result.config.agentQuickPrompts && result.config.agentQuickPrompts.length > 0) {
@@ -4242,29 +5168,28 @@ async function loadOllamaSettings() {
     }
 
     // Update Ollama UI
-    if (state.ollamaPath && elements.ollamaPathInput) {
-      elements.ollamaPathInput.value = state.ollamaPath;
+    if (state.ollamaUrl && elements.ollamaPathInput) {
+      elements.ollamaPathInput.value = state.ollamaUrl;
 
-      // Try to load models if we have a path
+      // Try to load models if we have a URL
       if (state.ollamaAvailable) {
-        await listOllamaModels(state.ollamaPath);
+        await listOllamaModels();
       }
     }
 
-    // Update Vector DB UI
-    if (elements.vectorDbEnabled) {
-      elements.vectorDbEnabled.checked = state.vectorDbEnabled;
-      if (state.vectorDbEnabled) {
-        elements.vectorDbConfig.style.display = 'block';
+    // Update system prompt UI
+    if (elements.ollamaSystemPrompt) {
+      // Use custom prompt if set, otherwise use default
+      elements.ollamaSystemPrompt.value = state.ollamaSystemPrompt || DEFAULT_OLLAMA_SYSTEM_PROMPT;
+
+      // Show system prompt section if Ollama is configured
+      if (state.ollamaAvailable && elements.ollamaSystemPromptSection) {
+        elements.ollamaSystemPromptSection.style.display = 'block';
       }
     }
-    if (elements.vectorDbUrl) {
-      elements.vectorDbUrl.value = state.vectorDbUrl;
-    }
-    if (elements.vectorDbCollection) {
-      elements.vectorDbCollection.value = state.vectorDbCollection;
-    }
-    updateVectorDbStatus();
+
+    // Vector DB is now embedded and automatically initialized on app startup
+    // No UI configuration needed - embeddings work for all folders automatically
 
     // Render prompts and update agent dropdown
     renderPromptsList();
@@ -4278,81 +5203,191 @@ async function loadOllamaSettings() {
 // ========================================
 // Vector Database Integration
 // ========================================
-function updateVectorDbStatus(icon = '○', text = 'Not configured', type = 'info') {
-  if (elements.vectorDbStatusIcon) {
-    elements.vectorDbStatusIcon.textContent = icon;
-  }
-  if (elements.vectorDbStatusText) {
-    elements.vectorDbStatusText.textContent = text;
-  }
-  if (elements.vectorDbStatus) {
-    // Update color based on type
-    if (type === 'success') {
-      elements.vectorDbStatus.style.color = 'var(--success)';
-    } else if (type === 'error') {
-      elements.vectorDbStatus.style.color = 'var(--danger)';
-    } else {
-      elements.vectorDbStatus.style.color = 'var(--text-secondary)';
+// Note: Vector DB is now embedded and auto-initialized
+// No manual configuration or testing needed
+
+// Removed functions (UI elements no longer exist):
+// - updateVectorDbStatus()
+// - testVectorDbConnection()
+// - handleVectorDbEnabledChange()
+// - handleVectorDbUrlChange()
+// - handleVectorDbCollectionChange()
+
+// ========================================
+// Bulk Embeddings Generation
+// ========================================
+
+/**
+ * Update bulk embeddings folder dropdown
+ * Populate with folders that have embeddings enabled
+ */
+/**
+ * Recursively collect all tasks from a task tree
+ */
+function collectAllTasks(tasks, collected = []) {
+  for (const task of tasks) {
+    collected.push(task);
+    if (task.children && task.children.length > 0) {
+      collectAllTasks(task.children, collected);
     }
   }
+  return collected;
 }
 
-async function testVectorDbConnection() {
+/**
+ * Handle regenerate all embeddings button click
+ */
+async function handleRegenerateAllEmbeddings() {
   try {
-    updateVectorDbStatus('⏳', 'Testing connection...', 'info');
-
-    const url = elements.vectorDbUrl.value.trim();
-    if (!url) {
-      updateVectorDbStatus('✗', 'URL is required', 'error');
+    // Confirm with user
+    if (!confirm('Regenerate embeddings for ALL tasks across ALL folders?\n\nThis will use the currently selected embedding model and may take several minutes for large task collections.\n\nThis action cannot be undone.')) {
       return;
     }
 
-    // Test connection via IPC (main process handles the request)
-    const result = await window.electronAPI.vectordb.testConnection(url);
+    // Update status to show processing
+    elements.embeddingsStatusIcon.textContent = 'hourglass_empty';
+    elements.embeddingsStatusIcon.style.color = 'var(--accent-primary)';
+    elements.embeddingsStatusText.textContent = 'Clearing existing embeddings...';
+    elements.embeddingsStatus.style.background = 'var(--bg-secondary)';
+    elements.embeddingsStatus.style.borderColor = 'var(--accent-primary)';
+
+    // Disable button during processing
+    elements.regenerateEmbeddingsBtn.disabled = true;
+
+    // Clear existing vector database by reinitializing
+    console.log('[Regenerate] Clearing existing embeddings database...');
+    const reinitResult = await window.electronAPI.vectordb.reinitialize(state.ollamaUrl, state.ollamaEmbeddingModel);
+
+    if (!reinitResult.success) {
+      console.error('[Regenerate] Failed to reinitialize vector database:', reinitResult.error);
+      elements.embeddingsStatusIcon.textContent = 'error';
+      elements.embeddingsStatusIcon.style.color = 'var(--danger)';
+      elements.embeddingsStatusText.textContent = `Failed to clear embeddings: ${reinitResult.error}`;
+      elements.embeddingsStatus.style.background = 'var(--danger-bg)';
+      elements.embeddingsStatus.style.borderColor = 'var(--danger)';
+      elements.regenerateEmbeddingsBtn.disabled = false;
+      return;
+    }
+
+    console.log('[Regenerate] Vector database cleared successfully');
+
+    // Update status to loading tasks
+    elements.embeddingsStatusText.textContent = 'Loading all tasks...';
+
+    let totalTasks = 0;
+    const allTasksForBulk = [];
+
+    // Load tasks from all folders
+    for (const folder of state.taskFolders) {
+      const loadResult = await window.electronAPI.tasks.load(folder.path);
+      if (loadResult.success && loadResult.tasks) {
+        const folderTasks = collectAllTasks(loadResult.tasks);
+        console.log(`[Regenerate] Folder "${folder.name}": ${folderTasks.length} tasks`);
+
+        // Prepare tasks for bulk processing
+        for (const task of folderTasks) {
+          const taskText = generateTaskText(task);
+          if (taskText && taskText.trim().length > 0) {
+            allTasksForBulk.push({
+              taskId: task.filePath || task.path,
+              text: taskText,
+              metadata: extractTaskMetadata({ ...task, folderId: folder.id })
+            });
+          }
+        }
+        totalTasks += folderTasks.length;
+      }
+    }
+
+    if (allTasksForBulk.length === 0) {
+      elements.embeddingsStatusIcon.textContent = 'info';
+      elements.embeddingsStatusIcon.style.color = 'var(--text-secondary)';
+      elements.embeddingsStatusText.textContent = 'No tasks found to process';
+      elements.embeddingsStatus.style.background = 'var(--bg-secondary)';
+      elements.embeddingsStatus.style.borderColor = 'var(--border-color)';
+      elements.regenerateEmbeddingsBtn.disabled = false;
+      return;
+    }
+
+    console.log(`[Regenerate] Total: ${allTasksForBulk.length} tasks across ${state.taskFolders.length} folders`);
+
+    elements.embeddingsStatusText.textContent = `Generating embeddings for ${allTasksForBulk.length} tasks... (this may take several minutes)`;
+
+    // Call bulk store API
+    const result = await window.electronAPI.vectordb.bulkStore(allTasksForBulk);
 
     if (result.success) {
-      state.vectorDbConnected = true;
-      updateVectorDbStatus('✓', 'Connected successfully', 'success');
-
-      // Save settings
-      await saveFoldersToStorage();
+      if (result.failed === 0) {
+        elements.embeddingsStatusIcon.textContent = 'check_circle';
+        elements.embeddingsStatusIcon.style.color = 'var(--success)';
+        elements.embeddingsStatusText.textContent = `Successfully generated embeddings for all ${result.processed} tasks`;
+        elements.embeddingsStatus.style.background = 'var(--success-bg)';
+        elements.embeddingsStatus.style.borderColor = 'var(--success)';
+      } else {
+        elements.embeddingsStatusIcon.textContent = 'warning';
+        elements.embeddingsStatusIcon.style.color = 'var(--warning)';
+        elements.embeddingsStatusText.textContent = `Completed with ${result.processed} successful, ${result.failed} failed`;
+        elements.embeddingsStatus.style.background = 'var(--warning-bg)';
+        elements.embeddingsStatus.style.borderColor = 'var(--warning)';
+      }
     } else {
-      state.vectorDbConnected = false;
-      updateVectorDbStatus('✗', `Connection failed: ${result.error}`, 'error');
+      elements.embeddingsStatusIcon.textContent = 'error';
+      elements.embeddingsStatusIcon.style.color = 'var(--danger)';
+      elements.embeddingsStatusText.textContent = `Failed: ${result.error}`;
+      elements.embeddingsStatus.style.background = 'var(--danger-bg)';
+      elements.embeddingsStatus.style.borderColor = 'var(--danger)';
+    }
+
+    // Re-enable button
+    elements.regenerateEmbeddingsBtn.disabled = false;
+
+    // Refresh status after a short delay
+    setTimeout(async () => {
+      await checkEmbeddingsStatus();
+    }, 3000);
+
+  } catch (error) {
+    console.error('Error regenerating embeddings:', error);
+    elements.embeddingsStatusIcon.textContent = 'error';
+    elements.embeddingsStatusIcon.style.color = 'var(--danger)';
+    elements.embeddingsStatusText.textContent = `Error: ${error.message}`;
+    elements.embeddingsStatus.style.background = 'var(--danger-bg)';
+    elements.embeddingsStatus.style.borderColor = 'var(--danger)';
+    elements.regenerateEmbeddingsBtn.disabled = false;
+  }
+}
+
+/**
+ * Check and display embeddings status
+ */
+async function checkEmbeddingsStatus() {
+  try {
+    // Check if embeddings are initialized
+    const result = await window.electronAPI.vectordb.isInitialized();
+
+    if (result.success && result.initialized) {
+      // Embeddings are enabled
+      elements.embeddingsStatusIcon.textContent = 'check_circle';
+      elements.embeddingsStatusIcon.style.color = 'var(--success)';
+      elements.embeddingsStatusText.textContent = 'Embeddings enabled - Tasks will be automatically indexed for semantic search';
+      elements.embeddingsStatus.style.background = 'var(--success-bg)';
+      elements.embeddingsStatus.style.borderColor = 'var(--success)';
+    } else {
+      // Embeddings are disabled
+      elements.embeddingsStatusIcon.textContent = 'info';
+      elements.embeddingsStatusIcon.style.color = 'var(--text-secondary)';
+      elements.embeddingsStatusText.textContent = 'Embeddings disabled - Configure Ollama URL and select an embedding model above to enable';
+      elements.embeddingsStatus.style.background = 'var(--bg-secondary)';
+      elements.embeddingsStatus.style.borderColor = 'var(--border-color)';
     }
   } catch (error) {
-    console.error('Vector DB connection error:', error);
-    state.vectorDbConnected = false;
-    updateVectorDbStatus('✗', `Error: ${error.message}`, 'error');
+    console.error('Error checking embeddings status:', error);
+    elements.embeddingsStatusIcon.textContent = 'error';
+    elements.embeddingsStatusIcon.style.color = 'var(--danger)';
+    elements.embeddingsStatusText.textContent = 'Error checking embeddings status';
+    elements.embeddingsStatus.style.background = 'var(--danger-bg)';
+    elements.embeddingsStatus.style.borderColor = 'var(--danger)';
   }
-}
-
-function handleVectorDbEnabledChange() {
-  state.vectorDbEnabled = elements.vectorDbEnabled.checked;
-
-  // Show/hide config section
-  if (state.vectorDbEnabled) {
-    elements.vectorDbConfig.style.display = 'block';
-    updateVectorDbStatus('○', 'Configure and test connection', 'info');
-  } else {
-    elements.vectorDbConfig.style.display = 'none';
-    updateVectorDbStatus('○', 'Disabled', 'info');
-  }
-
-  // Save settings
-  saveFoldersToStorage();
-}
-
-function handleVectorDbUrlChange() {
-  state.vectorDbUrl = elements.vectorDbUrl.value.trim();
-  state.vectorDbConnected = false;
-  updateVectorDbStatus('○', 'Click "Test Connection" to verify', 'info');
-  saveFoldersToStorage();
-}
-
-function handleVectorDbCollectionChange() {
-  state.vectorDbCollection = elements.vectorDbCollection.value.trim() || 'tasker_tasks';
-  saveFoldersToStorage();
 }
 
 // ========================================
@@ -5295,8 +6330,40 @@ function addAgentMessage(content, type = 'assistant', withSpinner = false, withS
 
   elements.agentMessages.appendChild(messageDiv);
 
-  // Scroll to bottom
-  elements.agentMessages.scrollTop = elements.agentMessages.scrollHeight;
+  // Auto-scroll behavior for new messages
+  if (elements.agentChat) {
+    // Use a small delay to ensure DOM layout is complete before scrolling
+    setTimeout(() => {
+      const container = elements.agentChat;
+      const messageTop = messageDiv.offsetTop;
+      const messageHeight = messageDiv.offsetHeight;
+      const messageBottom = messageTop + messageHeight;
+      const containerHeight = container.clientHeight;
+      const currentScrollTop = container.scrollTop;
+      const viewportTop = currentScrollTop;
+      const viewportBottom = currentScrollTop + containerHeight;
+
+      // Check if message fits in viewport
+      if (messageHeight <= containerHeight) {
+        // Message fits - scroll to show it fully
+        // Position it so the bottom is visible
+        const targetScroll = messageBottom - containerHeight;
+        container.scrollTop = Math.max(0, targetScroll);
+      } else {
+        // Message is too tall - scroll just enough to show the top
+        // Don't scroll past the top of the message
+        if (messageTop < viewportTop) {
+          // Message starts above viewport - scroll up to it
+          container.scrollTop = messageTop;
+        } else if (messageTop >= viewportBottom) {
+          // Message starts below viewport - scroll down to show it
+          // Position top of message near top of viewport with small padding
+          container.scrollTop = messageTop - 20; // 20px padding
+        }
+        // If messageTop is already in viewport, don't scroll at all
+      }
+    }, 10);
+  }
 
   return messageDiv;
 }
@@ -5349,6 +6416,86 @@ function buildTasksContext(tasks, indent = 0) {
   return context;
 }
 
+/**
+ * Build smart task context using semantic search when available
+ * Falls back to full task list if embeddings aren't enabled
+ * @param {string} query - User's question/prompt
+ * @param {number} limit - Maximum number of relevant tasks to return (default: 10)
+ * @returns {Promise<string>} - Formatted task context
+ */
+async function buildSmartTasksContext(query, limit = 10) {
+  // Check if embeddings are enabled for current folder
+  if (!areEmbeddingsEnabled()) {
+    // Fallback to traditional full context
+    console.log('[AI Agent] Embeddings not enabled, using full task list');
+    return buildTasksContext(state.tasks);
+  }
+
+  try {
+    console.log('[AI Agent] Using semantic search for context');
+
+    // Perform semantic search
+    const searchResult = await window.electronAPI.vectordb.search(query, limit);
+
+    if (!searchResult.success) {
+      console.warn('[AI Agent] Semantic search failed, falling back to full list:', searchResult.error);
+      return buildTasksContext(state.tasks);
+    }
+
+    if (!searchResult.results || searchResult.results.length === 0) {
+      console.log('[AI Agent] No semantic search results, using full task list');
+      return buildTasksContext(state.tasks);
+    }
+
+    // Log search results
+    console.log('[AI Agent] Vector DB search returned', searchResult.results.length, 'results:');
+    searchResult.results.forEach((result, index) => {
+      const metadata = result.metadata || {};
+      const score = result.score ? `${(result.score * 100).toFixed(1)}%` : 'N/A';
+      console.log(`  ${index + 1}. "${metadata.title || 'Untitled'}" (score: ${score}, taskId: ${result.taskId})`);
+    });
+
+    // Build context from search results
+    let context = `[Using semantic search - ${searchResult.results.length} most relevant tasks]\n\n`;
+
+    for (const result of searchResult.results) {
+      const metadata = result.metadata || {};
+      const score = result.score ? ` (relevance: ${(result.score * 100).toFixed(1)}%)` : '';
+
+      const completionStatus = metadata.completed ? '[✓]' : '[ ]';
+      const dueDate = metadata.dueDate ? ` (Due: ${metadata.dueDate})` : '';
+      const created = metadata.created ? ` (Created: ${metadata.created.split('T')[0]})` : '';
+      const title = metadata.title || 'Untitled Task';
+
+      context += `${completionStatus} ${title}${dueDate}${created}${score}\n`;
+
+      // Add task details/body from metadata
+      const details = metadata.details || metadata.body;
+      if (details && details.trim()) {
+        context += `  Details: ${details.trim()}\n`;
+      }
+
+      // Always show priority
+      const priority = metadata.priority || 'normal';
+      context += `  Priority: ${priority.charAt(0).toUpperCase() + priority.slice(1)}\n`;
+
+      // Always show status
+      const taskStatus = metadata.status || 'Pending';
+      context += `  Status: ${taskStatus}\n`;
+
+      context += '\n';
+    }
+
+    console.log(`[AI Agent] Built context from ${searchResult.results.length} semantically relevant tasks`);
+    return context;
+
+  } catch (error) {
+    console.error('[AI Agent] Error in semantic search:', error);
+    // Fallback to traditional context on error
+    return buildTasksContext(state.tasks);
+  }
+}
+
 async function sendAgentMessage(prompt) {
   if (!prompt || !prompt.trim()) return;
 
@@ -5377,8 +6524,8 @@ async function sendAgentMessage(prompt) {
     elements.agentInput.value = '';
   }
 
-  // Build task context
-  const tasksContext = buildTasksContext(state.tasks);
+  // Build task context using semantic search when available
+  const tasksContext = await buildSmartTasksContext(prompt);
 
   // Create a unique request ID
   const requestId = Date.now();
@@ -5710,6 +6857,136 @@ function setupEventListeners() {
     }
   });
 
+  // Text Context Menu - for input/textarea fields and any selected text
+  document.addEventListener('contextmenu', (e) => {
+    const target = e.target;
+    const selection = window.getSelection();
+    const hasSelection = selection && selection.toString().length > 0;
+
+    // Check if right-click is on an input/textarea or there's selected text
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || hasSelection) {
+      e.preventDefault();
+
+      // Store the target element
+      state.textContextTarget = target;
+
+      // Show/hide menu items based on context
+      const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+      const pasteItem = elements.textContextMenu.querySelector('[data-action="paste"]');
+      const cutItem = elements.textContextMenu.querySelector('[data-action="cut"]');
+      const selectAllItem = elements.textContextMenu.querySelector('[data-action="select-all"]');
+      const divider = elements.textContextMenu.querySelector('.context-menu-divider');
+
+      // Only show paste, cut, and select-all for editable fields
+      if (pasteItem) pasteItem.style.display = isEditable ? '' : 'none';
+      if (cutItem) cutItem.style.display = isEditable ? '' : 'none';
+      if (selectAllItem) selectAllItem.style.display = isEditable ? '' : 'none';
+      // Hide divider if select-all is hidden (nothing below it)
+      if (divider) divider.style.display = isEditable ? '' : 'none';
+
+      // Position and show text context menu
+      elements.textContextMenu.style.left = `${e.clientX}px`;
+      elements.textContextMenu.style.top = `${e.clientY}px`;
+      elements.textContextMenu.classList.add('active');
+    }
+  });
+
+  // Text context menu item clicks
+  elements.textContextMenu.addEventListener('click', async (e) => {
+    const menuItem = e.target.closest('.context-menu-item');
+    if (!menuItem || !state.textContextTarget) return;
+
+    const action = menuItem.dataset.action;
+    const target = state.textContextTarget;
+    const isEditable = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+
+    switch (action) {
+      case 'copy':
+        if (isEditable) {
+          // Copy from input/textarea
+          if (target.selectionStart !== target.selectionEnd) {
+            const selectedText = target.value.substring(target.selectionStart, target.selectionEnd);
+            await window.electronAPI.clipboard.writeText(selectedText);
+          } else {
+            // If no selection, copy all text
+            await window.electronAPI.clipboard.writeText(target.value);
+          }
+        } else {
+          // Copy from any selected text in the page
+          const selection = window.getSelection();
+          const selectedText = selection.toString();
+          if (selectedText) {
+            await window.electronAPI.clipboard.writeText(selectedText);
+          }
+        }
+        break;
+
+      case 'paste':
+        const clipboardText = await window.electronAPI.clipboard.readText();
+        const start = target.selectionStart;
+        const end = target.selectionEnd;
+        const text = target.value;
+
+        // Insert clipboard text at cursor or replace selection
+        target.value = text.substring(0, start) + clipboardText + text.substring(end);
+
+        // Set cursor position after pasted text
+        target.selectionStart = target.selectionEnd = start + clipboardText.length;
+
+        // Trigger input event for any listeners
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        break;
+
+      case 'cut':
+        if (target.selectionStart !== target.selectionEnd) {
+          const selectedText = target.value.substring(target.selectionStart, target.selectionEnd);
+          await window.electronAPI.clipboard.writeText(selectedText);
+
+          // Remove selected text
+          const startPos = target.selectionStart;
+          const endPos = target.selectionEnd;
+          target.value = target.value.substring(0, startPos) + target.value.substring(endPos);
+          target.selectionStart = target.selectionEnd = startPos;
+
+          // Trigger input event
+          target.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        break;
+
+      case 'select-all':
+        target.select();
+        break;
+    }
+
+    // Close context menu
+    elements.textContextMenu.classList.remove('active');
+    state.textContextTarget = null;
+  });
+
+  // Close text context menu when clicking elsewhere
+  document.addEventListener('click', (e) => {
+    if (!elements.textContextMenu.contains(e.target)) {
+      elements.textContextMenu.classList.remove('active');
+      state.textContextTarget = null;
+    }
+  });
+
+  // Global copy handler - copy any selected text with Ctrl+C
+  document.addEventListener('keydown', async (e) => {
+    // Check for Ctrl+C (Windows/Linux) or Cmd+C (Mac)
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && !e.shiftKey && !e.altKey) {
+      const selection = window.getSelection();
+      const selectedText = selection.toString();
+
+      // Only handle if text is selected and not in an input/textarea (those handle themselves)
+      if (selectedText && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+        e.preventDefault();
+        await window.electronAPI.clipboard.writeText(selectedText);
+        console.log('Copied selected text to clipboard');
+      }
+    }
+  });
+
   // Folder management
   elements.addFolderSettingsBtn.addEventListener('click', openAddFolderModal);
 
@@ -5779,16 +7056,16 @@ function setupEventListeners() {
 
   // Ollama
   elements.detectOllamaBtn.addEventListener('click', detectOllama);
-  elements.browseOllamaBtn.addEventListener('click', browseForOllama);
   elements.ollamaModelSelect.addEventListener('change', handleOllamaModelChange);
+  elements.ollamaEmbeddingModelSelect.addEventListener('change', handleOllamaEmbeddingModelChange);
   elements.refreshModelsBtn.addEventListener('click', refreshOllamaModels);
+  elements.ollamaSystemPrompt.addEventListener('blur', handleSystemPromptChange);
+  elements.resetSystemPromptBtn.addEventListener('click', handleResetSystemPrompt);
 
-  // Git
-  // Vector DB
-  elements.vectorDbEnabled.addEventListener('change', handleVectorDbEnabledChange);
-  elements.vectorDbUrl.addEventListener('change', handleVectorDbUrlChange);
-  elements.vectorDbCollection.addEventListener('change', handleVectorDbCollectionChange);
-  elements.testVectorDbBtn.addEventListener('click', testVectorDbConnection);
+  // Embeddings
+  // Embeddings are now automatic for all folders when tasks are created/updated
+  // Users can manually regenerate all embeddings with the button in settings
+  elements.regenerateEmbeddingsBtn.addEventListener('click', handleRegenerateAllEmbeddings);
 
   // Git
   elements.detectGitBtn.addEventListener('click', detectGit);
@@ -5913,24 +7190,30 @@ function setupEventListeners() {
   // Escape key to close modals and views
   document.addEventListener('keydown', async (e) => {
     if (e.key === 'Escape') {
-      // If we're in an input field, clear it and blur
+      // Check if any modals are open first (priority over input clearing)
+      if (elements.moveTaskModal.classList.contains('active')) {
+        closeMoveTaskModal();
+        return;
+      } else if (elements.taskModal.classList.contains('active')) {
+        closeTaskModal();
+        return;
+      } else if (elements.addFolderModal.classList.contains('active')) {
+        closeAddFolderModal();
+        return;
+      } else if (elements.commitModal.classList.contains('active')) {
+        closeCommitModal();
+        return;
+      }
+
+      // If we're in an input field and no modals are open, clear it and blur
       if (e.target.matches('input[type="text"], textarea')) {
         e.target.value = '';
         e.target.blur();
         return;
       }
 
-      // Check if any modals are open
-      if (elements.moveTaskModal.classList.contains('active')) {
-        closeMoveTaskModal();
-      } else if (elements.taskModal.classList.contains('active')) {
-        closeTaskModal();
-      } else if (elements.addFolderModal.classList.contains('active')) {
-        closeAddFolderModal();
-      } else if (elements.commitModal.classList.contains('active')) {
-        closeCommitModal();
-      } else if (state.currentView === 'help' || state.currentView === 'settings' || state.currentView === 'dashboard') {
-        // If in help, settings, or dashboard, return to tasks view
+      // If in help, settings, or dashboard, return to tasks view
+      if (state.currentView === 'help' || state.currentView === 'settings' || state.currentView === 'dashboard') {
         navigateToView('tasks');
       }
     }
@@ -6133,6 +7416,14 @@ async function handleKanbanDrop(e) {
 
     if (result.success) {
       await loadTasks();
+
+      // Update embeddings with new status (fire-and-forget, don't block UI)
+      const updatedTask = findTaskByPath(state.tasks, taskPath);
+      if (updatedTask) {
+        updateTaskEmbeddings(updatedTask).catch(err => {
+          console.error('Error updating embeddings:', err);
+        });
+      }
 
       // Commit to git asynchronously (fire-and-forget, don't block UI)
       commitTaskChange(`Change status of "${taskTitle}" to ${newStatus}`).catch(err => {
