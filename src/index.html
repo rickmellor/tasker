@@ -25,8 +25,43 @@
             <h2>Tasker</h2>
           </div>
 
-          <nav class="sidebar-nav" id="sidebar-folders">
-            <!-- Folders will be rendered here -->
+          <nav class="sidebar-nav">
+            <!-- Tasks Section -->
+            <div class="sidebar-section" id="tasks-section">
+              <div class="sidebar-section-header" data-section="tasks">
+                <span class="sidebar-section-icon material-icons">expand_more</span>
+                <span class="sidebar-section-title">Tasks</span>
+              </div>
+              <div class="sidebar-section-content" id="sidebar-folders">
+                <!-- Task folders will be rendered here -->
+              </div>
+            </div>
+
+            <!-- OKRs Section -->
+            <div class="sidebar-section" id="okrs-section" style="display: none;">
+              <div class="sidebar-section-header" data-section="okrs">
+                <span class="sidebar-section-icon material-icons">expand_more</span>
+                <span class="sidebar-section-title">OKRs</span>
+              </div>
+              <div class="sidebar-section-content" id="sidebar-okrs">
+                <div class="sidebar-item" data-type="okrs">
+                  <span class="sidebar-item-text">Objectives & Key Results</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Goals Section -->
+            <div class="sidebar-section" id="goals-section" style="display: none;">
+              <div class="sidebar-section-header" data-section="goals">
+                <span class="sidebar-section-icon material-icons">expand_more</span>
+                <span class="sidebar-section-title">Annual Goals</span>
+              </div>
+              <div class="sidebar-section-content" id="sidebar-goals">
+                <div class="sidebar-item" data-type="goals">
+                  <span class="sidebar-item-text">Annual Goals</span>
+                </div>
+              </div>
+            </div>
           </nav>
 
           <div class="agent-resize-handle" id="agent-resize-handle"></div>
@@ -235,6 +270,118 @@
                   </div>
                   <div class="metric-value" id="stat-pending">0</div>
                   <div class="metric-description">Tasks still in progress</div>
+                </div>
+              </div>
+
+              <!-- Strategic Overview Section -->
+              <div class="strategic-overview-section">
+                <div class="section-header">
+                  <h2>Strategic Overview</h2>
+                  <span class="wip-badge">WIP</span>
+                </div>
+
+                <div class="strategic-grid">
+                  <!-- Near-Term Risk Items -->
+                  <div class="strategic-card">
+                    <h3 class="strategic-card-title">
+                      <span class="material-icons">warning</span>
+                      Near-Term Risk Items
+                    </h3>
+                    <div class="risk-items">
+                      <div class="risk-item risk-high">
+                        <span class="risk-bullet">•</span>
+                        <span class="risk-text">Manager reviews: Due in 3 days</span>
+                        <span class="risk-priority">(High Importance)</span>
+                      </div>
+                      <div class="risk-item risk-medium">
+                        <span class="risk-bullet">•</span>
+                        <span class="risk-text">CNC machine tuning: Needed for upcoming demo</span>
+                        <span class="risk-priority">(Medium)</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Goal Progress -->
+                  <div class="strategic-card">
+                    <h3 class="strategic-card-title">
+                      <span class="material-icons">flag</span>
+                      Goal Progress
+                    </h3>
+                    <div class="progress-items">
+                      <div class="progress-item">
+                        <div class="progress-header">
+                          <span class="progress-name">Product Perspective & Ownership</span>
+                          <span class="progress-value">32%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                          <div class="progress-bar" style="width: 32%;">
+                            <div class="progress-fill progress-on-track"></div>
+                          </div>
+                        </div>
+                        <span class="progress-status status-on-track">On Track</span>
+                      </div>
+                      <div class="progress-item">
+                        <div class="progress-header">
+                          <span class="progress-name">Technical Leadership</span>
+                          <span class="progress-value">12%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                          <div class="progress-bar" style="width: 12%;">
+                            <div class="progress-fill progress-at-risk"></div>
+                          </div>
+                        </div>
+                        <span class="progress-status status-at-risk">At Risk</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- OKR Progress -->
+                  <div class="strategic-card">
+                    <h3 class="strategic-card-title">
+                      <span class="material-icons">track_changes</span>
+                      OKR Progress
+                    </h3>
+                    <div class="progress-items">
+                      <div class="progress-item">
+                        <div class="progress-header">
+                          <span class="progress-name">Execution Predictability</span>
+                          <span class="progress-value">60%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                          <div class="progress-bar" style="width: 60%;">
+                            <div class="progress-fill progress-on-track"></div>
+                          </div>
+                        </div>
+                        <span class="progress-status status-on-track">On Track</span>
+                      </div>
+                      <div class="progress-item">
+                        <div class="progress-header">
+                          <span class="progress-name">Cross-Team Collaboration</span>
+                          <span class="progress-value">35%</span>
+                        </div>
+                        <div class="progress-bar-container">
+                          <div class="progress-bar" style="width: 35%;">
+                            <div class="progress-fill progress-at-risk"></div>
+                          </div>
+                        </div>
+                        <span class="progress-status status-at-risk">At Risk</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- AI Week-Ahead Plan -->
+                  <div class="strategic-card">
+                    <h3 class="strategic-card-title">
+                      <span class="material-icons">smart_toy</span>
+                      AI Week-Ahead Plan
+                    </h3>
+                    <ol class="week-ahead-list">
+                      <li>Finish annual manager reviews</li>
+                      <li>Schedule sync w/ PMO for upcoming release</li>
+                      <li>Address top 5 backlog bugs for KR2</li>
+                      <li>Resume architecture forum planning</li>
+                    </ol>
+                  </div>
                 </div>
               </div>
             </div>
@@ -745,6 +892,26 @@
                     <option value="dark">Dark</option>
                   </select>
                   <p class="setting-description">Choose your preferred color theme</p>
+                </div>
+              </div>
+
+              <div class="settings-section">
+                <h3>Feature Toggles</h3>
+
+                <div class="setting-item">
+                  <label for="enable-okrs-checkbox">
+                    <input type="checkbox" id="enable-okrs-checkbox" style="width: auto; margin-right: 0.5rem;" />
+                    Enable OKR Tracking
+                  </label>
+                  <p class="setting-description">Track Objectives and Key Results alongside your tasks. OKRs will appear in the sidebar and can be used for strategic planning.</p>
+                </div>
+
+                <div class="setting-item">
+                  <label for="enable-goals-checkbox">
+                    <input type="checkbox" id="enable-goals-checkbox" style="width: auto; margin-right: 0.5rem;" />
+                    Enable Annual Goals Tracking
+                  </label>
+                  <p class="setting-description">Track annual goals and long-term objectives. Goals will appear in the sidebar and integrate with the strategic overview dashboard.</p>
                 </div>
               </div>
 

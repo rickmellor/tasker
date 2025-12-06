@@ -660,6 +660,10 @@ ${body}
         activeFilters: ['all'],
         sortOrder: 'default',
         expandedTasks: {}, // { folderId: [taskId1, taskId2, ...] }
+        enableOkrs: false, // Toggle OKR tracking
+        enableGoals: false, // Toggle Annual Goals tracking
+        okrsPath: null, // Path to OKRs folder (auto-set on first enable)
+        goalsPath: null, // Path to Goals folder (auto-set on first enable)
         created: new Date().toISOString(),
         modified: new Date().toISOString()
       };
