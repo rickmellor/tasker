@@ -2589,9 +2589,6 @@ function openTaskModal(task) {
   elements.modalPriority.value = task.priority || 'normal';
   elements.modalDueDate.value = task.dueDate || '';
 
-  // Show details in display mode with clickable links
-  showDetailsDisplayMode();
-
   // Populate status dropdown and select current status
   if (elements.modalStatus) {
     elements.modalStatus.innerHTML = state.taskStatuses.map(status => `
@@ -2630,6 +2627,12 @@ function openTaskModal(task) {
 
   // Setup status sync handlers
   setupModalStatusSync();
+
+  // Switch to edit mode and focus the details field after a short delay
+  // to ensure the modal is fully visible
+  setTimeout(() => {
+    showDetailsEditMode();
+  }, 50);
 }
 
 function setupModalStatusSync() {
@@ -2674,9 +2677,12 @@ async function saveTaskModal() {
     status: elements.modalStatus ? elements.modalStatus.value : 'Pending'
   };
 
+  // Save the file path before closing modal (which sets state.editingTask to null)
+  const taskFilePath = state.editingTask.filePath;
+
   try {
     const result = await window.electronAPI.tasks.update(
-      state.editingTask.filePath,
+      taskFilePath,
       updates
     );
 
@@ -2685,7 +2691,7 @@ async function saveTaskModal() {
       await loadTasks();
 
       // Update embeddings with new task data (fire-and-forget, don't block UI)
-      const updatedTask = findTaskByPath(state.tasks, state.editingTask.filePath);
+      const updatedTask = findTaskByPath(state.tasks, taskFilePath);
       if (updatedTask) {
         updateTaskEmbeddings(updatedTask).catch(err => {
           console.error('Error updating embeddings:', err);
