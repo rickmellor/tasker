@@ -122,6 +122,7 @@ const elements = {
   // Views
   views: {
     tasks: document.getElementById('tasks-view'),
+    'goals-view': document.getElementById('goals-view'),
     profile: document.getElementById('profile-view'),
     help: document.getElementById('help-view'),
     settings: document.getElementById('settings-view')
