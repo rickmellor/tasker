@@ -96,7 +96,9 @@ const state = {
   ctrlKeyPressed: false, // Track Ctrl/Cmd key state for delete button styling
   taskViewMode: 'list', // Track task view mode: 'list' or 'kanban'
   selectedTaskPaths: [], // Track selected tasks for multi-select and keyboard navigation
-  lastSelectedTaskPath: null // Track last selected task for shift-click range selection
+  lastSelectedTaskPath: null, // Track last selected task for shift-click range selection
+  enableOkrs: false, // Enable OKR tracking
+  enableGoals: false // Enable Annual Goals tracking
 };
 
 // ========================================
@@ -180,6 +182,12 @@ const elements = {
   resetHotkeyBtn: document.getElementById('reset-hotkey-btn'),
   autoLaunchCheckbox: document.getElementById('auto-launch-checkbox'),
   startMinimizedCheckbox: document.getElementById('start-minimized-checkbox'),
+  enableOkrsCheckbox: document.getElementById('enable-okrs-checkbox'),
+  enableGoalsCheckbox: document.getElementById('enable-goals-checkbox'),
+
+  // Sidebar Sections
+  okrsSection: document.getElementById('okrs-section'),
+  goalsSection: document.getElementById('goals-section'),
 
   // Ollama
   ollamaPathInput: document.getElementById('ollama-path-input'),
@@ -466,6 +474,10 @@ async function loadFoldersFromStorage() {
     // Load task view mode (default to 'list')
     state.taskViewMode = result.config.taskViewMode || 'list';
 
+    // Load feature toggles (default to false)
+    state.enableOkrs = result.config.enableOkrs || false;
+    state.enableGoals = result.config.enableGoals || false;
+
     // Load expanded tasks for current folder
     const expandedTasksData = result.config.expandedTasks || {};
     if (state.currentFolderId && expandedTasksData[state.currentFolderId]) {
@@ -535,7 +547,9 @@ async function saveAllSettings() {
       taskStatuses: state.taskStatuses,
       timelineZoom: state.timelineZoom,
       taskViewMode: state.taskViewMode,
-      agentHeight: state.agentHeight
+      agentHeight: state.agentHeight,
+      enableOkrs: state.enableOkrs,
+      enableGoals: state.enableGoals
     });
   } finally {
     hideSavingIndicator();
@@ -1503,6 +1517,19 @@ function applyAgentHeight(height) {
   elements.sidebarAgent.style.height = `${height}px`;
 }
 
+function setupSidebarSectionCollapse() {
+  // Event delegation for sidebar section headers
+  document.addEventListener('click', (e) => {
+    const sectionHeader = e.target.closest('.sidebar-section-header');
+    if (sectionHeader) {
+      const section = sectionHeader.closest('.sidebar-section');
+      if (section) {
+        section.classList.toggle('collapsed');
+      }
+    }
+  });
+}
+
 // ========================================
 // UI State Restoration
 // ========================================
@@ -1538,6 +1565,16 @@ function restoreUIState() {
   // Restore start minimized checkbox
   if (elements.startMinimizedCheckbox) {
     elements.startMinimizedCheckbox.checked = state.startMinimized;
+  }
+
+  // Restore OKRs and Goals checkboxes and section visibility
+  if (elements.enableOkrsCheckbox) {
+    elements.enableOkrsCheckbox.checked = state.enableOkrs;
+    elements.okrsSection.style.display = state.enableOkrs ? 'block' : 'none';
+  }
+  if (elements.enableGoalsCheckbox) {
+    elements.enableGoalsCheckbox.checked = state.enableGoals;
+    elements.goalsSection.style.display = state.enableGoals ? 'block' : 'none';
   }
 
   // Restore view mode button states
@@ -4303,6 +4340,44 @@ async function handleStartMinimizedChange(event) {
   }
 }
 
+async function handleEnableOkrsChange(event) {
+  const isEnabled = event.target.checked;
+  state.enableOkrs = isEnabled;
+
+  // Toggle section visibility
+  elements.okrsSection.style.display = isEnabled ? 'block' : 'none';
+
+  try {
+    // Save the setting
+    await saveAllSettings();
+  } catch (error) {
+    console.error('Error updating enable OKRs:', error);
+    // Revert checkbox on error
+    elements.enableOkrsCheckbox.checked = !isEnabled;
+    state.enableOkrs = !isEnabled;
+    elements.okrsSection.style.display = !isEnabled ? 'block' : 'none';
+  }
+}
+
+async function handleEnableGoalsChange(event) {
+  const isEnabled = event.target.checked;
+  state.enableGoals = isEnabled;
+
+  // Toggle section visibility
+  elements.goalsSection.style.display = isEnabled ? 'block' : 'none';
+
+  try {
+    // Save the setting
+    await saveAllSettings();
+  } catch (error) {
+    console.error('Error updating enable Goals:', error);
+    // Revert checkbox on error
+    elements.enableGoalsCheckbox.checked = !isEnabled;
+    state.enableGoals = !isEnabled;
+    elements.goalsSection.style.display = !isEnabled ? 'block' : 'none';
+  }
+}
+
 // ========================================
 // Global Hotkey Management
 // ========================================
@@ -7059,6 +7134,8 @@ function setupEventListeners() {
   elements.resetHotkeyBtn.addEventListener('click', resetHotkeyToDefault);
   elements.autoLaunchCheckbox.addEventListener('change', handleAutoLaunchChange);
   elements.startMinimizedCheckbox.addEventListener('change', handleStartMinimizedChange);
+  elements.enableOkrsCheckbox.addEventListener('change', handleEnableOkrsChange);
+  elements.enableGoalsCheckbox.addEventListener('change', handleEnableGoalsChange);
 
   // Ollama
   elements.detectOllamaBtn.addEventListener('click', detectOllama);
@@ -7574,6 +7651,9 @@ async function init() {
 
     // Setup agent resizing
     setupAgentResize();
+
+    // Setup sidebar section collapse/expand
+    setupSidebarSectionCollapse();
 
     // Setup hotkey recorder
     setupHotkeyRecorder();
