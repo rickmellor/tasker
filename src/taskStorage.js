@@ -186,6 +186,14 @@ class TaskStorage {
     let body = '';
     let inFrontmatter = false;
 
+    // Goal-specific fields
+    let whyItMatters = '';
+    let successCriteria = '';
+    let keyMilestones = [];
+    let linkedTasks = [];
+    let goalStatus = 'On Track';
+    let confidenceLevel = null;
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
@@ -212,6 +220,29 @@ class TaskStorage {
           created = line.substring(8).trim();
         } else if (line.startsWith('status:')) {
           status = line.substring(7).trim();
+        } else if (line.startsWith('whyItMatters:')) {
+          whyItMatters = line.substring(13).trim();
+        } else if (line.startsWith('successCriteria:')) {
+          successCriteria = line.substring(16).trim();
+        } else if (line.startsWith('keyMilestones:')) {
+          try {
+            const jsonStr = line.substring(14).trim();
+            keyMilestones = jsonStr ? JSON.parse(jsonStr) : [];
+          } catch (e) {
+            keyMilestones = [];
+          }
+        } else if (line.startsWith('linkedTasks:')) {
+          try {
+            const jsonStr = line.substring(12).trim();
+            linkedTasks = jsonStr ? JSON.parse(jsonStr) : [];
+          } catch (e) {
+            linkedTasks = [];
+          }
+        } else if (line.startsWith('goalStatus:')) {
+          goalStatus = line.substring(11).trim();
+        } else if (line.startsWith('confidenceLevel:')) {
+          const value = line.substring(16).trim();
+          confidenceLevel = value ? parseInt(value) : null;
         }
       } else {
         body += line + '\n';
@@ -271,25 +302,56 @@ class TaskStorage {
       filePath,
       hasChildren,
       children: [],
-      deleted: isDeleted
+      deleted: isDeleted,
+      // Goal-specific fields (will be empty for regular tasks)
+      whyItMatters: whyItMatters || '',
+      successCriteria: successCriteria || '',
+      keyMilestones: keyMilestones || [],
+      linkedTasks: linkedTasks || [],
+      goalStatus: goalStatus || 'On Track',
+      confidenceLevel: confidenceLevel
     };
   }
 
   /**
    * Create task markdown content
    */
-  createTaskContent(title, completed = false, body = '', priority = 'normal', dueDate = null, status = 'Pending', created = null) {
+  createTaskContent(title, completed = false, body = '', priority = 'normal', dueDate = null, status = 'Pending', created = null, goalFields = {}) {
     const createdDate = created || new Date().toISOString();
     const dueDateLine = dueDate ? `dueDate: ${dueDate}` : 'dueDate: ';
 
-    return `---
+    // Build frontmatter with standard fields
+    let frontmatter = `---
 completed: ${completed}
 title: ${title}
 priority: ${priority}
 ${dueDateLine}
 status: ${status}
-created: ${createdDate}
----
+created: ${createdDate}`;
+
+    // Add Goal-specific fields if provided
+    if (goalFields.whyItMatters !== undefined) {
+      frontmatter += `\nwhyItMatters: ${goalFields.whyItMatters || ''}`;
+    }
+    if (goalFields.successCriteria !== undefined) {
+      frontmatter += `\nsuccessCriteria: ${goalFields.successCriteria || ''}`;
+    }
+    if (goalFields.keyMilestones !== undefined) {
+      frontmatter += `\nkeyMilestones: ${JSON.stringify(goalFields.keyMilestones || [])}`;
+    }
+    if (goalFields.linkedTasks !== undefined) {
+      frontmatter += `\nlinkedTasks: ${JSON.stringify(goalFields.linkedTasks || [])}`;
+    }
+    if (goalFields.goalStatus !== undefined) {
+      frontmatter += `\ngoalStatus: ${goalFields.goalStatus || 'On Track'}`;
+    }
+    if (goalFields.confidenceLevel !== undefined) {
+      frontmatter += `\nconfidenceLevel: ${goalFields.confidenceLevel !== null ? goalFields.confidenceLevel : ''}`;
+    }
+
+    frontmatter += '\n---';
+
+    return `${frontmatter}
 
 # ${title}
 
@@ -363,6 +425,14 @@ ${body}
     const dueDate = updates.dueDate !== undefined ? updates.dueDate : task.dueDate;
     let status = updates.status !== undefined ? updates.status : task.status;
 
+    // Goal-specific fields
+    const whyItMatters = updates.whyItMatters !== undefined ? updates.whyItMatters : task.whyItMatters;
+    const successCriteria = updates.successCriteria !== undefined ? updates.successCriteria : task.successCriteria;
+    const keyMilestones = updates.keyMilestones !== undefined ? updates.keyMilestones : task.keyMilestones;
+    const linkedTasks = updates.linkedTasks !== undefined ? updates.linkedTasks : task.linkedTasks;
+    const goalStatus = updates.goalStatus !== undefined ? updates.goalStatus : task.goalStatus;
+    const confidenceLevel = updates.confidenceLevel !== undefined ? updates.confidenceLevel : task.confidenceLevel;
+
     // Sync status and completed flag - prioritize status field over completed checkbox
     if (updates.status !== undefined) {
       // If status is being updated, sync completed flag
@@ -372,10 +442,19 @@ ${body}
       status = updates.completed ? 'Completed' : 'Pending';
     }
 
-    const content = this.createTaskContent(title, completed, body, priority, dueDate, status, task.created);
+    const goalFields = {
+      whyItMatters,
+      successCriteria,
+      keyMilestones,
+      linkedTasks,
+      goalStatus,
+      confidenceLevel
+    };
+
+    const content = this.createTaskContent(title, completed, body, priority, dueDate, status, task.created, goalFields);
     await fs.writeFile(taskPath, content, 'utf-8');
 
-    return { ...task, title, completed, body, priority, dueDate, status };
+    return { ...task, title, completed, body, priority, dueDate, status, whyItMatters, successCriteria, keyMilestones, linkedTasks, goalStatus, confidenceLevel };
   }
 
   /**

@@ -237,6 +237,25 @@
             </div>
           </div>
 
+          <!-- Goals View -->
+          <div id="goals-view" class="view">
+            <header class="view-header">
+              <h1>Annual Goals</h1>
+              <div class="header-actions">
+                <button id="add-goal-btn" class="btn-primary">
+                  <span class="material-icons" style="font-size: 18px; vertical-align: middle; margin-right: 0.25rem;">add</span>
+                  Add Goal
+                </button>
+              </div>
+            </header>
+
+            <div class="view-content">
+              <div id="goals-container" class="goals-container">
+                <p class="empty-state">No goals yet. Click "Add Goal" to create your first annual goal!</p>
+              </div>
+            </div>
+          </div>
+
           <!-- Profile View -->
           <div id="profile-view" class="view">
             <header class="view-header">
@@ -1256,6 +1275,86 @@
         <div class="modal-footer">
           <button id="add-folder-cancel-btn" class="btn-secondary">Cancel</button>
           <button id="add-folder-save-btn" class="btn-primary">Add Folder</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Goal Edit Modal -->
+    <div id="goal-modal" class="modal">
+      <div class="modal-content" style="max-width: 800px;">
+        <div class="modal-header">
+          <h2>Edit Goal</h2>
+        </div>
+
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="goal-modal-title">Goal Title</label>
+            <input type="text" id="goal-modal-title" class="input-lg" placeholder="Annual goal title" />
+          </div>
+
+          <div class="form-group">
+            <label for="goal-modal-description">Description</label>
+            <textarea id="goal-modal-description" class="textarea-lg" rows="4" placeholder="What is this goal about?"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="goal-modal-why">Why It Matters</label>
+            <textarea id="goal-modal-why" class="textarea-lg" rows="3" placeholder="Why is this goal important?"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="goal-modal-success">Success Criteria</label>
+            <textarea id="goal-modal-success" class="textarea-lg" rows="3" placeholder="How will you know when this goal is achieved?"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label>Key Milestones</label>
+            <div id="goal-modal-milestones" class="milestones-list">
+              <!-- Milestones will be rendered here -->
+            </div>
+            <button id="add-milestone-btn" class="btn-secondary" style="margin-top: 0.5rem;">
+              <span class="material-icons" style="font-size: 16px; vertical-align: middle; margin-right: 0.25rem;">add</span>
+              Add Milestone
+            </button>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="goal-modal-status">Status</label>
+              <select id="goal-modal-status" class="select">
+                <option value="On Track">On Track</option>
+                <option value="At Risk">At Risk</option>
+                <option value="Off Track">Off Track</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="goal-modal-confidence">Confidence Level (%)</label>
+              <input type="number" id="goal-modal-confidence" class="input-lg" min="0" max="100" placeholder="0-100" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Linked Tasks</label>
+            <div id="goal-modal-linked-tasks" class="linked-tasks-list">
+              <!-- Linked tasks will be rendered here -->
+            </div>
+            <button id="link-task-btn" class="btn-secondary" style="margin-top: 0.5rem;">
+              <span class="material-icons" style="font-size: 16px; vertical-align: middle; margin-right: 0.25rem;">link</span>
+              Link Task
+            </button>
+          </div>
+
+          <div class="form-group">
+            <label>Created</label>
+            <input type="text" id="goal-modal-created" class="input-lg" readonly disabled />
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="goal-modal-delete-btn" class="btn-danger" style="margin-right: auto;">Delete Goal</button>
+          <button id="goal-modal-cancel-btn" class="btn-secondary">Cancel</button>
+          <button id="goal-modal-save-btn" class="btn-primary">Save</button>
         </div>
       </div>
     </div>

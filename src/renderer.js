@@ -320,6 +320,24 @@ const elements = {
   commitCancelBtn: document.getElementById('commit-cancel-btn'),
   commitRollbackBtn: document.getElementById('commit-rollback-btn'),
 
+  // Goal Modal
+  goalModal: document.getElementById('goal-modal'),
+  goalModalTitle: document.getElementById('goal-modal-title'),
+  goalModalDescription: document.getElementById('goal-modal-description'),
+  goalModalWhy: document.getElementById('goal-modal-why'),
+  goalModalSuccess: document.getElementById('goal-modal-success'),
+  goalModalMilestones: document.getElementById('goal-modal-milestones'),
+  goalModalStatus: document.getElementById('goal-modal-status'),
+  goalModalConfidence: document.getElementById('goal-modal-confidence'),
+  goalModalLinkedTasks: document.getElementById('goal-modal-linked-tasks'),
+  goalModalCreated: document.getElementById('goal-modal-created'),
+  goalModalCancelBtn: document.getElementById('goal-modal-cancel-btn'),
+  goalModalSaveBtn: document.getElementById('goal-modal-save-btn'),
+  goalModalDeleteBtn: document.getElementById('goal-modal-delete-btn'),
+  addMilestoneBtn: document.getElementById('add-milestone-btn'),
+  linkTaskBtn: document.getElementById('link-task-btn'),
+  addGoalBtn: document.getElementById('add-goal-btn'),
+
   // Context Menu
   taskContextMenu: document.getElementById('task-context-menu'),
   textContextMenu: document.getElementById('text-context-menu')
@@ -2097,28 +2115,209 @@ async function loadOkrs() {
 
 async function loadGoals() {
   try {
-    // Navigate to tasks view first
-    navigateToView('tasks');
+    // Navigate to goals view
+    navigateToView('goals');
 
     // Load Goals data
     const result = await window.electronAPI.goals.load();
 
     if (result.success) {
-      state.tasks = result.goals;
-      // Add parent IDs to all goals for easy parent lookup
-      addParentIds(state.tasks);
-      renderTasks();
-      updateDeletedCount();
+      state.goals = result.goals || [];
+      renderGoals();
     } else {
       console.error('Failed to load Goals:', result.error);
-      state.tasks = [];
-      renderTasks();
+      state.goals = [];
+      renderGoals();
     }
   } catch (error) {
     console.error('Error loading Goals:', error);
-    state.tasks = [];
-    renderTasks();
+    state.goals = [];
+    renderGoals();
   }
+}
+
+// ========================================
+// Goals Rendering Functions
+// ========================================
+
+function renderGoals() {
+  const container = document.getElementById('goals-container');
+  if (!container) return;
+
+  // Clear container
+  container.innerHTML = '';
+
+  if (!state.goals || state.goals.length === 0) {
+    container.innerHTML = '<p class="empty-state">No goals yet. Click "Add Goal" to create your first annual goal!</p>';
+    return;
+  }
+
+  // Render each goal as a card
+  state.goals.forEach(goal => {
+    const card = createGoalCard(goal);
+    container.appendChild(card);
+  });
+}
+
+function createGoalCard(goal) {
+  const card = document.createElement('div');
+  card.className = 'goal-card';
+  card.dataset.goalId = goal.id;
+
+  // Calculate progress from linked tasks
+  const progress = calculateGoalProgress(goal);
+
+  // Determine status class
+  const statusClass = (goal.goalStatus || 'On Track').toLowerCase().replace(/\s+/g, '-');
+
+  card.innerHTML = `
+    <div class="goal-card-header">
+      <div class="goal-card-title-section">
+        <h3 class="goal-card-title">${escapeHtml(goal.title || 'Untitled Goal')}</h3>
+        <div class="goal-card-status-row">
+          <span class="goal-status-badge ${statusClass}">${escapeHtml(goal.goalStatus || 'On Track')}</span>
+          ${goal.confidenceLevel !== null && goal.confidenceLevel !== undefined ? `
+            <div class="goal-confidence">
+              <span>${goal.confidenceLevel}%</span>
+              <div class="confidence-bar">
+                <div class="confidence-fill" style="width: ${goal.confidenceLevel}%"></div>
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+      <span class="material-icons goal-card-expand-icon">expand_more</span>
+    </div>
+
+    <div class="goal-card-body">
+      ${goal.body ? `
+        <div class="goal-section">
+          <div class="goal-section-title">Description</div>
+          <div class="goal-section-content">${escapeHtml(goal.body)}</div>
+        </div>
+      ` : ''}
+
+      ${goal.whyItMatters ? `
+        <div class="goal-section">
+          <div class="goal-section-title">Why It Matters</div>
+          <div class="goal-section-content">${escapeHtml(goal.whyItMatters)}</div>
+        </div>
+      ` : ''}
+
+      ${goal.successCriteria ? `
+        <div class="goal-section">
+          <div class="goal-section-title">Success Criteria</div>
+          <div class="goal-section-content">${escapeHtml(goal.successCriteria)}</div>
+        </div>
+      ` : ''}
+
+      ${goal.keyMilestones && goal.keyMilestones.length > 0 ? `
+        <div class="goal-section">
+          <div class="goal-section-title">Key Milestones</div>
+          <div class="milestones-list">
+            ${goal.keyMilestones.map(milestone => `
+              <div class="milestone-item ${milestone.completed ? 'completed' : ''}">
+                <input type="checkbox" class="milestone-checkbox" ${milestone.completed ? 'checked' : ''} disabled />
+                <div class="milestone-content">
+                  <div class="milestone-title">${escapeHtml(milestone.title || 'Untitled Milestone')}</div>
+                  ${milestone.date ? `<div class="milestone-date">Target: ${new Date(milestone.date).toLocaleDateString()}</div>` : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      ${goal.linkedTasks && goal.linkedTasks.length > 0 ? `
+        <div class="goal-section">
+          <div class="goal-section-title">Linked Tasks (${progress.completed}/${progress.total})</div>
+          <div class="linked-tasks-list">
+            ${goal.linkedTasks.map(taskId => {
+              const task = findTaskById(taskId);
+              return task ? `
+                <div class="linked-task-item ${task.completed ? 'completed' : ''}">
+                  <div class="linked-task-info">
+                    <input type="checkbox" class="linked-task-checkbox" ${task.completed ? 'checked' : ''} disabled />
+                    <span class="linked-task-title">${escapeHtml(task.title || 'Untitled Task')}</span>
+                  </div>
+                </div>
+              ` : '';
+            }).join('')}
+          </div>
+          <div class="goal-progress-section">
+            <div class="progress-rollup">
+              <div class="progress-rollup-bar">
+                <div class="progress-rollup-fill" style="width: ${progress.percentage}%"></div>
+              </div>
+              <div class="progress-rollup-text">
+                <span>Progress: ${progress.percentage}%</span>
+                <span>${progress.completed} of ${progress.total} tasks complete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="goal-card-actions">
+        <button class="goal-card-action-btn" onclick="openGoalEditModal('${goal.id}')">
+          <span class="material-icons">edit</span>
+          <span>Edit</span>
+        </button>
+      </div>
+    </div>
+  `;
+
+  // Add click handler for expand/collapse (only on header, not on body)
+  const header = card.querySelector('.goal-card-header');
+  header.addEventListener('click', (e) => {
+    // Don't toggle if clicking on action buttons
+    if (!e.target.closest('.goal-card-action-btn')) {
+      card.classList.toggle('expanded');
+    }
+  });
+
+  return card;
+}
+
+function calculateGoalProgress(goal) {
+  if (!goal.linkedTasks || goal.linkedTasks.length === 0) {
+    return { total: 0, completed: 0, percentage: 0 };
+  }
+
+  let total = 0;
+  let completed = 0;
+
+  goal.linkedTasks.forEach(taskId => {
+    const task = findTaskById(taskId);
+    if (task) {
+      total++;
+      if (task.completed) {
+        completed++;
+      }
+    }
+  });
+
+  const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+  return { total, completed, percentage };
+}
+
+function findTaskById(taskId) {
+  // Search through all tasks in state.tasks to find matching task
+  // This is a simplified version - in production you'd want a more efficient lookup
+  function searchTasks(tasks) {
+    for (const task of tasks) {
+      if (task.id === taskId || task.filePath === taskId) {
+        return task;
+      }
+      if (task.children && task.children.length > 0) {
+        const found = searchTasks(task.children);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  return searchTasks(state.tasks || []);
 }
 
 async function addTask() {
@@ -2797,6 +2996,280 @@ async function saveTaskModal() {
     console.error('Error saving task:', error);
     alert('Error saving task: ' + error.message);
   }
+}
+
+// ========================================
+// Goal Modal
+// ========================================
+function openGoalEditModal(goalId) {
+  if (goalId) {
+    // Edit existing goal
+    const goal = state.goals.find(g => g.id === goalId || g.id === parseInt(goalId));
+    if (!goal) {
+      console.error('Goal not found:', goalId);
+      return;
+    }
+    state.editingGoal = goal;
+  } else {
+    // Create new goal
+    state.editingGoal = null;
+  }
+
+  // Populate modal fields
+  if (state.editingGoal) {
+    elements.goalModalTitle.value = state.editingGoal.title || '';
+    elements.goalModalDescription.value = state.editingGoal.body || '';
+    elements.goalModalWhy.value = state.editingGoal.whyItMatters || '';
+    elements.goalModalSuccess.value = state.editingGoal.successCriteria || '';
+    elements.goalModalStatus.value = state.editingGoal.goalStatus || 'On Track';
+    elements.goalModalConfidence.value = state.editingGoal.confidenceLevel || '';
+
+    // Format created date for display
+    const createdDate = new Date(state.editingGoal.created);
+    elements.goalModalCreated.value = createdDate.toLocaleString();
+
+    // Show delete button for existing goal
+    elements.goalModalDeleteBtn.style.display = 'block';
+  } else {
+    // Clear fields for new goal
+    elements.goalModalTitle.value = '';
+    elements.goalModalDescription.value = '';
+    elements.goalModalWhy.value = '';
+    elements.goalModalSuccess.value = '';
+    elements.goalModalStatus.value = 'On Track';
+    elements.goalModalConfidence.value = '';
+    elements.goalModalCreated.value = '';
+
+    // Hide delete button for new goal
+    elements.goalModalDeleteBtn.style.display = 'none';
+  }
+
+  // Render milestones and linked tasks
+  renderGoalMilestones();
+  renderGoalLinkedTasks();
+
+  // Show modal
+  elements.goalModal.classList.add('active');
+}
+
+function closeGoalModal() {
+  state.editingGoal = null;
+  elements.goalModal.classList.remove('active');
+}
+
+async function saveGoalModal() {
+  const title = elements.goalModalTitle.value.trim();
+  if (!title) {
+    alert('Please enter a goal title');
+    return;
+  }
+
+  const goalData = {
+    title,
+    body: elements.goalModalDescription.value.trim(),
+    whyItMatters: elements.goalModalWhy.value.trim(),
+    successCriteria: elements.goalModalSuccess.value.trim(),
+    keyMilestones: state.editingGoal ? state.editingGoal.keyMilestones || [] : [],
+    linkedTasks: state.editingGoal ? state.editingGoal.linkedTasks || [] : [],
+    goalStatus: elements.goalModalStatus.value,
+    confidenceLevel: elements.goalModalConfidence.value ? parseInt(elements.goalModalConfidence.value) : null
+  };
+
+  try {
+    if (state.editingGoal) {
+      // Update existing goal
+      const result = await window.electronAPI.goals.update(
+        state.editingGoal.filePath,
+        goalData
+      );
+
+      if (result.success) {
+        closeGoalModal();
+        await loadGoals();
+      } else {
+        console.error('Failed to update goal:', result.error);
+        alert('Failed to save goal: ' + result.error);
+      }
+    } else {
+      // Create new goal
+      const result = await window.electronAPI.goals.create(title, goalData.body);
+
+      if (result.success && result.goal) {
+        // Update the goal with additional fields
+        const updateResult = await window.electronAPI.goals.update(
+          result.goal.filePath,
+          goalData
+        );
+
+        if (updateResult.success) {
+          closeGoalModal();
+          await loadGoals();
+        } else {
+          console.error('Failed to update new goal:', updateResult.error);
+          alert('Failed to save goal: ' + updateResult.error);
+        }
+      } else {
+        console.error('Failed to create goal:', result.error);
+        alert('Failed to create goal: ' + result.error);
+      }
+    }
+  } catch (error) {
+    console.error('Error saving goal:', error);
+    alert('Error saving goal: ' + error.message);
+  }
+}
+
+async function deleteGoal() {
+  if (!state.editingGoal) return;
+
+  if (!confirm(`Are you sure you want to delete the goal "${state.editingGoal.title}"?`)) {
+    return;
+  }
+
+  try {
+    const result = await window.electronAPI.goals.delete(state.editingGoal.filePath);
+
+    if (result.success) {
+      closeGoalModal();
+      await loadGoals();
+    } else {
+      console.error('Failed to delete goal:', result.error);
+      alert('Failed to delete goal: ' + result.error);
+    }
+  } catch (error) {
+    console.error('Error deleting goal:', error);
+    alert('Error deleting goal: ' + error.message);
+  }
+}
+
+function addMilestone() {
+  if (!state.editingGoal) {
+    // If creating new goal, initialize milestones array
+    state.editingGoal = { keyMilestones: [] };
+  }
+
+  if (!state.editingGoal.keyMilestones) {
+    state.editingGoal.keyMilestones = [];
+  }
+
+  const newMilestone = {
+    title: '',
+    date: '',
+    completed: false
+  };
+
+  state.editingGoal.keyMilestones.push(newMilestone);
+  renderGoalMilestones();
+}
+
+function removeMilestone(index) {
+  if (!state.editingGoal || !state.editingGoal.keyMilestones) return;
+
+  state.editingGoal.keyMilestones.splice(index, 1);
+  renderGoalMilestones();
+}
+
+function renderGoalMilestones() {
+  const milestones = (state.editingGoal && state.editingGoal.keyMilestones) || [];
+
+  elements.goalModalMilestones.innerHTML = milestones.map((milestone, index) => `
+    <div class="milestone-item" data-index="${index}">
+      <input type="checkbox" class="milestone-checkbox" ${milestone.completed ? 'checked' : ''}
+             onchange="toggleMilestone(${index})" />
+      <div class="milestone-content">
+        <input type="text" class="milestone-title-input" placeholder="Milestone title"
+               value="${escapeHtml(milestone.title || '')}"
+               onchange="updateMilestone(${index}, 'title', this.value)"
+               style="width: 100%; background: transparent; border: none; border-bottom: 1px solid var(--border-color); padding: 0.25rem 0; font-size: 0.9rem; color: var(--text-primary);" />
+        <input type="date" class="milestone-date-input"
+               value="${milestone.date || ''}"
+               onchange="updateMilestone(${index}, 'date', this.value)"
+               style="margin-top: 0.25rem; background: transparent; border: 1px solid var(--border-color); border-radius: 3px; padding: 0.25rem; font-size: 0.75rem; color: var(--text-secondary);" />
+      </div>
+      <div class="milestone-actions">
+        <button class="milestone-action-btn" onclick="removeMilestone(${index})" title="Delete milestone">
+          <span class="material-icons">delete</span>
+        </button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleMilestone(index) {
+  if (!state.editingGoal || !state.editingGoal.keyMilestones) return;
+
+  state.editingGoal.keyMilestones[index].completed = !state.editingGoal.keyMilestones[index].completed;
+  renderGoalMilestones();
+}
+
+function updateMilestone(index, field, value) {
+  if (!state.editingGoal || !state.editingGoal.keyMilestones) return;
+
+  state.editingGoal.keyMilestones[index][field] = value;
+}
+
+async function linkTaskToGoal() {
+  // Simple implementation: show prompt for task ID
+  // In a real implementation, you'd show a task picker modal
+  const taskId = prompt('Enter the task ID or file path to link:');
+  if (!taskId) return;
+
+  // Find the task to verify it exists
+  const task = findTaskById(taskId);
+  if (!task) {
+    alert('Task not found');
+    return;
+  }
+
+  if (!state.editingGoal) {
+    state.editingGoal = { linkedTasks: [] };
+  }
+
+  if (!state.editingGoal.linkedTasks) {
+    state.editingGoal.linkedTasks = [];
+  }
+
+  // Check if already linked
+  if (state.editingGoal.linkedTasks.includes(taskId)) {
+    alert('Task is already linked to this goal');
+    return;
+  }
+
+  state.editingGoal.linkedTasks.push(taskId);
+  renderGoalLinkedTasks();
+}
+
+function removeLinkedTask(taskId) {
+  if (!state.editingGoal || !state.editingGoal.linkedTasks) return;
+
+  const index = state.editingGoal.linkedTasks.indexOf(taskId);
+  if (index > -1) {
+    state.editingGoal.linkedTasks.splice(index, 1);
+    renderGoalLinkedTasks();
+  }
+}
+
+function renderGoalLinkedTasks() {
+  const linkedTasks = (state.editingGoal && state.editingGoal.linkedTasks) || [];
+
+  elements.goalModalLinkedTasks.innerHTML = linkedTasks.map(taskId => {
+    const task = findTaskById(taskId);
+    if (!task) return '';
+
+    return `
+      <div class="linked-task-item ${task.completed ? 'completed' : ''}">
+        <div class="linked-task-info">
+          <input type="checkbox" class="linked-task-checkbox" ${task.completed ? 'checked' : ''} disabled />
+          <span class="linked-task-title">${escapeHtml(task.title || 'Untitled Task')}</span>
+        </div>
+        <div class="linked-task-actions">
+          <button class="linked-task-action-btn" onclick="removeLinkedTask('${taskId}')" title="Unlink task">
+            <span class="material-icons">link_off</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('') || '<p style="text-align: center; color: var(--text-secondary); padding: 1rem;">No tasks linked yet</p>';
 }
 
 // ========================================
@@ -7382,6 +7855,42 @@ function setupEventListeners() {
     }
   });
 
+  // Goal Modal
+  if (elements.addGoalBtn) {
+    elements.addGoalBtn.addEventListener('click', () => {
+      openGoalEditModal(null); // null = create new goal
+    });
+  }
+
+  if (elements.goalModalCancelBtn) {
+    elements.goalModalCancelBtn.addEventListener('click', closeGoalModal);
+  }
+
+  if (elements.goalModalSaveBtn) {
+    elements.goalModalSaveBtn.addEventListener('click', saveGoalModal);
+  }
+
+  if (elements.goalModalDeleteBtn) {
+    elements.goalModalDeleteBtn.addEventListener('click', deleteGoal);
+  }
+
+  if (elements.addMilestoneBtn) {
+    elements.addMilestoneBtn.addEventListener('click', addMilestone);
+  }
+
+  if (elements.linkTaskBtn) {
+    elements.linkTaskBtn.addEventListener('click', linkTaskToGoal);
+  }
+
+  // Close goal modal when clicking outside
+  if (elements.goalModal) {
+    elements.goalModal.addEventListener('click', (e) => {
+      if (e.target === elements.goalModal) {
+        closeGoalModal();
+      }
+    });
+  }
+
   // Escape key to close modals and views
   document.addEventListener('keydown', async (e) => {
     if (e.key === 'Escape') {
@@ -7391,6 +7900,9 @@ function setupEventListeners() {
         return;
       } else if (elements.taskModal.classList.contains('active')) {
         closeTaskModal();
+        return;
+      } else if (elements.goalModal && elements.goalModal.classList.contains('active')) {
+        closeGoalModal();
         return;
       } else if (elements.addFolderModal.classList.contains('active')) {
         closeAddFolderModal();
