@@ -57,9 +57,7 @@
                 <span class="sidebar-section-title">Annual Goals</span>
               </div>
               <div class="sidebar-section-content" id="sidebar-goals">
-                <div class="sidebar-item" data-type="goals">
-                  <span class="sidebar-item-text">Annual Goals</span>
-                </div>
+                <!-- Year subsections will be populated dynamically -->
               </div>
             </div>
           </nav>
@@ -1287,6 +1285,13 @@
         </div>
 
         <div class="modal-body">
+          <div class="form-group">
+            <label for="goal-modal-year">Year</label>
+            <select id="goal-modal-year" class="select">
+              <!-- Years will be populated dynamically -->
+            </select>
+          </div>
+
           <div class="form-group">
             <label for="goal-modal-title">Goal Title</label>
             <input type="text" id="goal-modal-title" class="input-lg" placeholder="Annual goal title" />

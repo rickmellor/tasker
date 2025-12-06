@@ -323,6 +323,7 @@ const elements = {
 
   // Goal Modal
   goalModal: document.getElementById('goal-modal'),
+  goalModalYear: document.getElementById('goal-modal-year'),
   goalModalTitle: document.getElementById('goal-modal-title'),
   goalModalDescription: document.getElementById('goal-modal-description'),
   goalModalWhy: document.getElementById('goal-modal-why'),
@@ -496,6 +497,11 @@ async function loadFoldersFromStorage() {
     // Load feature toggles (default to false)
     state.enableOkrs = result.config.enableOkrs || false;
     state.enableGoals = result.config.enableGoals || false;
+
+    // Initialize goals sidebar if goals are enabled
+    if (state.enableGoals) {
+      await initializeGoalsSidebar();
+    }
 
     // Load expanded tasks for current folder
     const expandedTasksData = result.config.expandedTasks || {};
@@ -2114,25 +2120,100 @@ async function loadOkrs() {
   }
 }
 
-async function loadGoals() {
+async function initializeGoalsSidebar() {
   try {
-    // Navigate to goals view
-    navigateToView('goals-view');
+    // Load Goals data
+    const result = await window.electronAPI.goals.load();
+
+    if (result.success) {
+      state.goals = result.goals || [];
+
+      // Organize goals by year
+      const goalsByYear = {};
+      state.goals.forEach(goal => {
+        const goalYear = goal.goalYear || new Date().getFullYear();
+        if (!goalsByYear[goalYear]) {
+          goalsByYear[goalYear] = [];
+        }
+        goalsByYear[goalYear].push(goal);
+      });
+
+      // If no goals exist, add placeholder for current year
+      const currentYear = new Date().getFullYear();
+      if (Object.keys(goalsByYear).length === 0) {
+        goalsByYear[currentYear] = [];
+      }
+
+      state.goalsByYear = goalsByYear;
+      // Don't set selectedGoalYear here - only when actually viewing goals
+      state.selectedGoalYear = null;
+
+      // Render sidebar with year subsections (no year will be highlighted)
+      renderGoalsSidebar();
+    }
+  } catch (error) {
+    console.error('Error initializing goals sidebar:', error);
+  }
+}
+
+async function loadGoals(year = null) {
+  try {
+    // Clear folder selection when viewing goals
+    state.currentFolderId = null;
+    renderSidebarFolders();
 
     // Load Goals data
     const result = await window.electronAPI.goals.load();
 
     if (result.success) {
       state.goals = result.goals || [];
+
+      // Organize goals by year
+      const goalsByYear = {};
+      state.goals.forEach(goal => {
+        const goalYear = goal.goalYear || new Date().getFullYear();
+        if (!goalsByYear[goalYear]) {
+          goalsByYear[goalYear] = [];
+        }
+        goalsByYear[goalYear].push(goal);
+      });
+
+      // If no goals exist, add placeholder for current year
+      const currentYear = new Date().getFullYear();
+      if (Object.keys(goalsByYear).length === 0) {
+        goalsByYear[currentYear] = [];
+      }
+
+      state.goalsByYear = goalsByYear;
+
+      // Set selected year before rendering sidebar
+      const selectedYear = year || currentYear;
+      state.selectedGoalYear = selectedYear;
+
+      // Render sidebar with year subsections
+      renderGoalsSidebar();
+
+      // Navigate to goals view and render
+      navigateToView('goals-view');
       renderGoals();
     } else {
       console.error('Failed to load Goals:', result.error);
       state.goals = [];
+      state.goalsByYear = {};
+      state.currentFolderId = null;
+      renderSidebarFolders();
+      renderGoalsSidebar();
+      navigateToView('goals-view');
       renderGoals();
     }
   } catch (error) {
     console.error('Error loading Goals:', error);
     state.goals = [];
+    state.goalsByYear = {};
+    state.currentFolderId = null;
+    renderSidebarFolders();
+    renderGoalsSidebar();
+    navigateToView('goals-view');
     renderGoals();
   }
 }
@@ -2148,15 +2229,62 @@ function renderGoals() {
   // Clear container
   container.innerHTML = '';
 
-  if (!state.goals || state.goals.length === 0) {
-    container.innerHTML = '<p class="empty-state">No goals yet. Click "Add Goal" to create your first annual goal!</p>';
+  // Filter goals by selected year
+  const selectedYear = state.selectedGoalYear || new Date().getFullYear();
+  const yearGoals = state.goalsByYear && state.goalsByYear[selectedYear] ? state.goalsByYear[selectedYear] : [];
+
+  if (yearGoals.length === 0) {
+    container.innerHTML = `<p class="empty-state">No goals for ${selectedYear} yet. Click "Add Goal" to create your first annual goal!</p>`;
     return;
   }
 
   // Render each goal as a card
-  state.goals.forEach(goal => {
+  yearGoals.forEach(goal => {
     const card = createGoalCard(goal);
     container.appendChild(card);
+  });
+}
+
+function renderGoalsSidebar() {
+  const sidebar = document.getElementById('sidebar-goals');
+  if (!sidebar) return;
+
+  // Clear sidebar
+  sidebar.innerHTML = '';
+
+  // Get years sorted in descending order (newest first)
+  const years = Object.keys(state.goalsByYear || {}).map(y => parseInt(y)).sort((a, b) => b - a);
+
+  if (years.length === 0) {
+    // Show placeholder for current year if no goals exist
+    const currentYear = new Date().getFullYear();
+    years.push(currentYear);
+  }
+
+  // Create year subsections
+  years.forEach(year => {
+    const yearItem = document.createElement('div');
+    yearItem.className = 'sidebar-item';
+    yearItem.dataset.year = year;
+
+    // Highlight selected year
+    if (year === state.selectedGoalYear) {
+      yearItem.classList.add('active');
+    }
+
+    const goalsCount = (state.goalsByYear && state.goalsByYear[year]) ? state.goalsByYear[year].length : 0;
+    yearItem.innerHTML = `
+      <span class="sidebar-item-text">${year}</span>
+      ${goalsCount > 0 ? `<span class="sidebar-item-count">${goalsCount}</span>` : ''}
+    `;
+
+    // Click handler to load goals for this year
+    yearItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      loadGoals(year);
+    });
+
+    sidebar.appendChild(yearItem);
   });
 }
 
@@ -2260,7 +2388,7 @@ function createGoalCard(goal) {
       ` : ''}
 
       <div class="goal-card-actions">
-        <button class="goal-card-action-btn" onclick="openGoalEditModal('${goal.id}')">
+        <button class="goal-card-action-btn">
           <span class="material-icons">edit</span>
           <span>Edit</span>
         </button>
@@ -2275,6 +2403,13 @@ function createGoalCard(goal) {
     if (!e.target.closest('.goal-card-action-btn')) {
       card.classList.toggle('expanded');
     }
+  });
+
+  // Add click handler for edit button
+  const editBtn = card.querySelector('.goal-card-action-btn');
+  editBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent card expansion
+    openGoalEditModal(goal.id);
   });
 
   return card;
@@ -3016,8 +3151,17 @@ function openGoalEditModal(goalId) {
     state.editingGoal = null;
   }
 
+  // Populate year dropdown (current year - 2 to current year + 5)
+  const currentYear = new Date().getFullYear();
+  const yearOptions = [];
+  for (let year = currentYear - 2; year <= currentYear + 5; year++) {
+    yearOptions.push(`<option value="${year}">${year}</option>`);
+  }
+  elements.goalModalYear.innerHTML = yearOptions.join('');
+
   // Populate modal fields
-  if (state.editingGoal) {
+  if (state.editingGoal && state.editingGoal.filePath) {
+    elements.goalModalYear.value = state.editingGoal.goalYear || currentYear;
     elements.goalModalTitle.value = state.editingGoal.title || '';
     elements.goalModalDescription.value = state.editingGoal.body || '';
     elements.goalModalWhy.value = state.editingGoal.whyItMatters || '';
@@ -3032,7 +3176,8 @@ function openGoalEditModal(goalId) {
     // Show delete button for existing goal
     elements.goalModalDeleteBtn.style.display = 'block';
   } else {
-    // Clear fields for new goal
+    // Clear fields for new goal - default to selected year or current year
+    elements.goalModalYear.value = state.selectedGoalYear || currentYear;
     elements.goalModalTitle.value = '';
     elements.goalModalDescription.value = '';
     elements.goalModalWhy.value = '';
@@ -3073,11 +3218,12 @@ async function saveGoalModal() {
     keyMilestones: state.editingGoal ? state.editingGoal.keyMilestones || [] : [],
     linkedTasks: state.editingGoal ? state.editingGoal.linkedTasks || [] : [],
     goalStatus: elements.goalModalStatus.value,
-    confidenceLevel: elements.goalModalConfidence.value ? parseInt(elements.goalModalConfidence.value) : null
+    confidenceLevel: elements.goalModalConfidence.value ? parseInt(elements.goalModalConfidence.value) : null,
+    goalYear: parseInt(elements.goalModalYear.value)
   };
 
   try {
-    if (state.editingGoal) {
+    if (state.editingGoal && state.editingGoal.filePath) {
       // Update existing goal
       const result = await window.electronAPI.goals.update(
         state.editingGoal.filePath,
@@ -3086,7 +3232,7 @@ async function saveGoalModal() {
 
       if (result.success) {
         closeGoalModal();
-        await loadGoals();
+        await loadGoals(goalData.goalYear);
       } else {
         console.error('Failed to update goal:', result.error);
         alert('Failed to save goal: ' + result.error);
@@ -3104,7 +3250,7 @@ async function saveGoalModal() {
 
         if (updateResult.success) {
           closeGoalModal();
-          await loadGoals();
+          await loadGoals(goalData.goalYear);
         } else {
           console.error('Failed to update new goal:', updateResult.error);
           alert('Failed to save goal: ' + updateResult.error);
@@ -3127,12 +3273,14 @@ async function deleteGoal() {
     return;
   }
 
+  const goalYear = state.editingGoal.goalYear;
+
   try {
     const result = await window.electronAPI.goals.delete(state.editingGoal.filePath);
 
     if (result.success) {
       closeGoalModal();
-      await loadGoals();
+      await loadGoals(goalYear);
     } else {
       console.error('Failed to delete goal:', result.error);
       alert('Failed to delete goal: ' + result.error);
@@ -3249,6 +3397,12 @@ function removeLinkedTask(taskId) {
     renderGoalLinkedTasks();
   }
 }
+
+// Expose functions to window for inline event handlers
+window.toggleMilestone = toggleMilestone;
+window.updateMilestone = updateMilestone;
+window.removeMilestone = removeMilestone;
+window.removeLinkedTask = removeLinkedTask;
 
 function renderGoalLinkedTasks() {
   const linkedTasks = (state.editingGoal && state.editingGoal.linkedTasks) || [];
@@ -4910,6 +5064,9 @@ async function handleEnableGoalsChange(event) {
       if (result.success) {
         // Save the path to config
         await window.electronAPI.config.update({ goalsPath: result.path });
+
+        // Load goals to populate sidebar with years
+        await initializeGoalsSidebar();
       } else {
         throw new Error(result.error || 'Failed to initialize Goals storage');
       }

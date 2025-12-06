@@ -193,6 +193,7 @@ class TaskStorage {
     let linkedTasks = [];
     let goalStatus = 'On Track';
     let confidenceLevel = null;
+    let goalYear = new Date().getFullYear(); // Default to current year
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -243,6 +244,9 @@ class TaskStorage {
         } else if (line.startsWith('confidenceLevel:')) {
           const value = line.substring(16).trim();
           confidenceLevel = value ? parseInt(value) : null;
+        } else if (line.startsWith('goalYear:')) {
+          const value = line.substring(9).trim();
+          goalYear = value ? parseInt(value) : new Date().getFullYear();
         }
       } else {
         body += line + '\n';
@@ -309,7 +313,8 @@ class TaskStorage {
       keyMilestones: keyMilestones || [],
       linkedTasks: linkedTasks || [],
       goalStatus: goalStatus || 'On Track',
-      confidenceLevel: confidenceLevel
+      confidenceLevel: confidenceLevel,
+      goalYear: goalYear || new Date().getFullYear()
     };
   }
 
@@ -347,6 +352,9 @@ created: ${createdDate}`;
     }
     if (goalFields.confidenceLevel !== undefined) {
       frontmatter += `\nconfidenceLevel: ${goalFields.confidenceLevel !== null ? goalFields.confidenceLevel : ''}`;
+    }
+    if (goalFields.goalYear !== undefined) {
+      frontmatter += `\ngoalYear: ${goalFields.goalYear || new Date().getFullYear()}`;
     }
 
     frontmatter += '\n---';
@@ -432,6 +440,7 @@ ${body}
     const linkedTasks = updates.linkedTasks !== undefined ? updates.linkedTasks : task.linkedTasks;
     const goalStatus = updates.goalStatus !== undefined ? updates.goalStatus : task.goalStatus;
     const confidenceLevel = updates.confidenceLevel !== undefined ? updates.confidenceLevel : task.confidenceLevel;
+    const goalYear = updates.goalYear !== undefined ? updates.goalYear : (task.goalYear || new Date().getFullYear());
 
     // Sync status and completed flag - prioritize status field over completed checkbox
     if (updates.status !== undefined) {
@@ -448,13 +457,14 @@ ${body}
       keyMilestones,
       linkedTasks,
       goalStatus,
-      confidenceLevel
+      confidenceLevel,
+      goalYear
     };
 
     const content = this.createTaskContent(title, completed, body, priority, dueDate, status, task.created, goalFields);
     await fs.writeFile(taskPath, content, 'utf-8');
 
-    return { ...task, title, completed, body, priority, dueDate, status, whyItMatters, successCriteria, keyMilestones, linkedTasks, goalStatus, confidenceLevel };
+    return { ...task, title, completed, body, priority, dueDate, status, whyItMatters, successCriteria, keyMilestones, linkedTasks, goalStatus, confidenceLevel, goalYear };
   }
 
   /**
