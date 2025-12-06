@@ -2116,7 +2116,7 @@ async function loadOkrs() {
 async function loadGoals() {
   try {
     // Navigate to goals view
-    navigateToView('goals');
+    navigateToView('goals-view');
 
     // Load Goals data
     const result = await window.electronAPI.goals.load();
