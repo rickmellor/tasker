@@ -3293,13 +3293,16 @@ async function deleteGoal() {
 
 function addMilestone() {
   if (!state.editingGoal) {
-    // If creating new goal, initialize milestones array
-    state.editingGoal = { keyMilestones: [] };
+    // If creating new goal, initialize with empty object (don't overwrite other fields)
+    state.editingGoal = {};
   }
 
   if (!state.editingGoal.keyMilestones) {
     state.editingGoal.keyMilestones = [];
   }
+
+  // Save current values from DOM before re-rendering
+  saveMilestonesFromDOM();
 
   const newMilestone = {
     title: '',
@@ -3309,10 +3312,43 @@ function addMilestone() {
 
   state.editingGoal.keyMilestones.push(newMilestone);
   renderGoalMilestones();
+
+  // Focus the new milestone's title input
+  setTimeout(() => {
+    const newMilestoneItem = elements.goalModalMilestones.querySelector(`[data-index="${state.editingGoal.keyMilestones.length - 1}"]`);
+    if (newMilestoneItem) {
+      const titleInput = newMilestoneItem.querySelector('.milestone-title-input');
+      if (titleInput) {
+        titleInput.focus();
+      }
+    }
+  }, 0);
+}
+
+function saveMilestonesFromDOM() {
+  if (!elements.goalModalMilestones || !state.editingGoal || !state.editingGoal.keyMilestones) return;
+
+  const milestoneItems = elements.goalModalMilestones.querySelectorAll('.milestone-item');
+  milestoneItems.forEach((item, index) => {
+    if (state.editingGoal.keyMilestones[index]) {
+      const titleInput = item.querySelector('.milestone-title-input');
+      const dateInput = item.querySelector('.milestone-date-input');
+
+      if (titleInput) {
+        state.editingGoal.keyMilestones[index].title = titleInput.value;
+      }
+      if (dateInput) {
+        state.editingGoal.keyMilestones[index].date = dateInput.value;
+      }
+    }
+  });
 }
 
 function removeMilestone(index) {
   if (!state.editingGoal || !state.editingGoal.keyMilestones) return;
+
+  // Save current values from DOM before removing
+  saveMilestonesFromDOM();
 
   state.editingGoal.keyMilestones.splice(index, 1);
   renderGoalMilestones();
@@ -3321,14 +3357,33 @@ function removeMilestone(index) {
 function renderGoalMilestones() {
   const milestones = (state.editingGoal && state.editingGoal.keyMilestones) || [];
 
+  // Save focus state before re-rendering
+  const activeElement = document.activeElement;
+  let focusedIndex = null;
+  let focusedField = null;
+  let cursorPosition = null;
+
+  if (activeElement && activeElement.classList.contains('milestone-title-input')) {
+    const milestoneItem = activeElement.closest('.milestone-item');
+    if (milestoneItem) {
+      focusedIndex = parseInt(milestoneItem.dataset.index);
+      focusedField = 'title';
+      cursorPosition = activeElement.selectionStart;
+    }
+  } else if (activeElement && activeElement.classList.contains('milestone-date-input')) {
+    const milestoneItem = activeElement.closest('.milestone-item');
+    if (milestoneItem) {
+      focusedIndex = parseInt(milestoneItem.dataset.index);
+      focusedField = 'date';
+    }
+  }
+
   elements.goalModalMilestones.innerHTML = milestones.map((milestone, index) => `
     <div class="milestone-item" data-index="${index}">
-      <input type="checkbox" class="milestone-checkbox" ${milestone.completed ? 'checked' : ''}
-             onchange="toggleMilestone(${index})" />
       <div class="milestone-content">
         <input type="text" class="milestone-title-input" placeholder="Milestone title"
                value="${escapeHtml(milestone.title || '')}"
-               onchange="updateMilestone(${index}, 'title', this.value)"
+               oninput="updateMilestone(${index}, 'title', this.value)"
                style="width: 100%; background: transparent; border: none; border-bottom: 1px solid var(--border-color); padding: 0.25rem 0; font-size: 0.9rem; color: var(--text-primary);" />
         <input type="date" class="milestone-date-input"
                value="${milestone.date || ''}"
@@ -3336,12 +3391,29 @@ function renderGoalMilestones() {
                style="margin-top: 0.25rem; background: transparent; border: 1px solid var(--border-color); border-radius: 3px; padding: 0.25rem; font-size: 0.75rem; color: var(--text-secondary);" />
       </div>
       <div class="milestone-actions">
-        <button class="milestone-action-btn" onclick="removeMilestone(${index})" title="Delete milestone">
+        <button type="button" class="milestone-action-btn" onclick="removeMilestone(${index})" title="Delete milestone">
           <span class="material-icons">delete</span>
         </button>
       </div>
     </div>
   `).join('');
+
+  // Restore focus and cursor position after re-rendering
+  if (focusedIndex !== null && focusedField) {
+    const milestoneItem = elements.goalModalMilestones.querySelector(`[data-index="${focusedIndex}"]`);
+    if (milestoneItem) {
+      const inputField = focusedField === 'title'
+        ? milestoneItem.querySelector('.milestone-title-input')
+        : milestoneItem.querySelector('.milestone-date-input');
+
+      if (inputField) {
+        inputField.focus();
+        if (focusedField === 'title' && cursorPosition !== null) {
+          inputField.setSelectionRange(cursorPosition, cursorPosition);
+        }
+      }
+    }
+  }
 }
 
 function toggleMilestone(index) {
@@ -3371,7 +3443,8 @@ async function linkTaskToGoal() {
   }
 
   if (!state.editingGoal) {
-    state.editingGoal = { linkedTasks: [] };
+    // If creating new goal, initialize with empty object (don't overwrite other fields)
+    state.editingGoal = {};
   }
 
   if (!state.editingGoal.linkedTasks) {

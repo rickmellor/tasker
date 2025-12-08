@@ -1377,10 +1377,14 @@ Use markdown-style formatting: **bold**, *italic*, bullet points (•), numbered
 
     await fs.writeFile(tempFile, promptContent);
 
+    // Construct the API URL (ollamaPath is actually the URL like http://192.168.1.100:11434)
+    const apiUrl = `${ollamaPath}/api/chat`;
+    console.log('[Ollama] Using API URL:', apiUrl);
+
     // Call ollama API using curl
     const curlCommand = process.platform === 'win32'
-      ? `curl -s http://localhost:11434/api/chat -d @"${tempFile}"`
-      : `curl -s http://localhost:11434/api/chat -d @${tempFile}`;
+      ? `curl -s "${apiUrl}" -d @"${tempFile}"`
+      : `curl -s "${apiUrl}" -d @${tempFile}`;
 
     const { stdout, stderr } = await execAsync(curlCommand, {
       timeout: 60000,
