@@ -109,9 +109,16 @@ async function createWindow() {
       // Save bounds async without blocking
       saveBounds();
 
-      // Hide the window
+      // On Wayland, hide() breaks window restoration
+      // Use minimize + skipTaskbar instead
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.hide();
+        if (process.platform === 'linux') {
+          console.log('[Wayland] Using minimize instead of hide');
+          mainWindow.setSkipTaskbar(true);
+          mainWindow.minimize();
+        } else {
+          mainWindow.hide();
+        }
       }
     }
   });
@@ -177,21 +184,13 @@ function createTray() {
 
           // Platform-specific window restoration
           if (process.platform === 'linux') {
-            // Linux requires a more aggressive approach
-            // First, make sure we're not skipping taskbar
+            // On Wayland, we minimized with skipTaskbar instead of hide()
+            // So restore is much simpler
+            console.log('[Tray] Wayland: restore from minimize');
             mainWindow.setSkipTaskbar(false);
-            // Show without stealing focus first
-            mainWindow.showInactive();
-            // Then force to top and focus
-            mainWindow.moveTop();
+            mainWindow.restore();
+            mainWindow.show();
             mainWindow.focus();
-            // Use setAlwaysOnTop trick to force window manager attention
-            mainWindow.setAlwaysOnTop(true);
-            setTimeout(() => {
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.setAlwaysOnTop(false);
-              }
-            }, 100);
           } else {
             // Windows and macOS
             mainWindow.show();
@@ -241,17 +240,12 @@ function createTray() {
 
         // Platform-specific window restoration
         if (process.platform === 'linux') {
-          // Linux requires a more aggressive approach
+          // On Wayland, we minimized with skipTaskbar instead of hide()
+          console.log('[Tray] Click - Wayland: restore from minimize');
           mainWindow.setSkipTaskbar(false);
-          mainWindow.showInactive();
-          mainWindow.moveTop();
+          mainWindow.restore();
+          mainWindow.show();
           mainWindow.focus();
-          mainWindow.setAlwaysOnTop(true);
-          setTimeout(() => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.setAlwaysOnTop(false);
-            }
-          }, 100);
         } else {
           mainWindow.show();
           if (process.platform === 'win32') {
