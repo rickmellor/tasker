@@ -10,7 +10,8 @@
     "build:win": "electron-builder --win",
     "build:win-dir": "electron-builder --win --dir",
     "build:mac": "electron-builder --mac",
-    "build:all": "electron-builder --win --mac"
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux"
   },
   "keywords": [
     "electron",
@@ -36,7 +37,11 @@
     },
     "files": [
       "src/**/*",
+      "assets/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "assets/**/*"
     ],
     "win": {
       "target": [
@@ -63,6 +68,22 @@
       ],
       "category": "public.app-category.productivity",
       "icon": "assets/icon.icns"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "icon": "assets/tasks.png",
+      "maintainer": "Tasker <tasker@example.com>",
+      "desktop": {
+        "Name": "Tasker",
+        "Comment": "Task Management Application",
+        "GenericName": "Task Manager",
+        "Categories": "Office;ProjectManagement;Productivity;",
+        "StartupWMClass": "tasker"
+      }
     },
     "nsis": {
       "oneClick": false,

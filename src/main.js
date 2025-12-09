@@ -133,7 +133,14 @@ async function createWindow() {
 function getTrayIconPath() {
   // Use white icon for dark system themes, black icon for light themes
   const iconName = nativeTheme.shouldUseDarkColors ? 'tasks-dark.png' : 'tasks.png';
-  return path.join(__dirname, '../assets', iconName);
+
+  // In production (packaged), assets are in the app.asar or resources directory
+  // In development, assets are in the project root
+  const assetsPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'assets')
+    : path.join(__dirname, '../assets');
+
+  return path.join(assetsPath, iconName);
 }
 
 function updateTrayIcon() {
@@ -158,15 +165,47 @@ function createTray() {
       label: 'Show Tasker',
       click: () => {
         if (mainWindow && !mainWindow.isDestroyed()) {
+          console.log('[Tray] Show Tasker clicked, current state:', {
+            isMinimized: mainWindow.isMinimized(),
+            isVisible: mainWindow.isVisible(),
+            isDestroyed: mainWindow.isDestroyed()
+          });
+
           if (mainWindow.isMinimized()) {
             mainWindow.restore();
           }
-          mainWindow.show();
-          mainWindow.focus();
 
-          // Bring to front (Windows specific)
-          mainWindow.setAlwaysOnTop(true);
-          mainWindow.setAlwaysOnTop(false);
+          // Platform-specific window restoration
+          if (process.platform === 'linux') {
+            // Linux requires a more aggressive approach
+            // First, make sure we're not skipping taskbar
+            mainWindow.setSkipTaskbar(false);
+            // Show without stealing focus first
+            mainWindow.showInactive();
+            // Then force to top and focus
+            mainWindow.moveTop();
+            mainWindow.focus();
+            // Use setAlwaysOnTop trick to force window manager attention
+            mainWindow.setAlwaysOnTop(true);
+            setTimeout(() => {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.setAlwaysOnTop(false);
+              }
+            }, 100);
+          } else {
+            // Windows and macOS
+            mainWindow.show();
+            if (process.platform === 'win32') {
+              mainWindow.setAlwaysOnTop(true);
+              mainWindow.setAlwaysOnTop(false);
+            }
+            mainWindow.focus();
+          }
+
+          console.log('[Tray] Window restored, new state:', {
+            isMinimized: mainWindow.isMinimized(),
+            isVisible: mainWindow.isVisible()
+          });
         }
       }
     },
@@ -191,15 +230,41 @@ function createTray() {
       if (mainWindow.isVisible()) {
         mainWindow.hide();
       } else {
+        console.log('[Tray] Click to show, current state:', {
+          isMinimized: mainWindow.isMinimized(),
+          isVisible: mainWindow.isVisible()
+        });
+
         if (mainWindow.isMinimized()) {
           mainWindow.restore();
         }
-        mainWindow.show();
-        mainWindow.focus();
 
-        // Bring to front (Windows specific)
-        mainWindow.setAlwaysOnTop(true);
-        mainWindow.setAlwaysOnTop(false);
+        // Platform-specific window restoration
+        if (process.platform === 'linux') {
+          // Linux requires a more aggressive approach
+          mainWindow.setSkipTaskbar(false);
+          mainWindow.showInactive();
+          mainWindow.moveTop();
+          mainWindow.focus();
+          mainWindow.setAlwaysOnTop(true);
+          setTimeout(() => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.setAlwaysOnTop(false);
+            }
+          }, 100);
+        } else {
+          mainWindow.show();
+          if (process.platform === 'win32') {
+            mainWindow.setAlwaysOnTop(true);
+            mainWindow.setAlwaysOnTop(false);
+          }
+          mainWindow.focus();
+        }
+
+        console.log('[Tray] Window shown, new state:', {
+          isMinimized: mainWindow.isMinimized(),
+          isVisible: mainWindow.isVisible()
+        });
       }
     }
   });
@@ -492,6 +557,60 @@ ipcMain.handle('update-global-hotkey', async (_event, accelerator) => {
 
 // Auto-Launch IPC handlers
 
+const AUTOSTART_DIR = path.join(require('os').homedir(), '.config', 'autostart');
+const AUTOSTART_FILE = path.join(AUTOSTART_DIR, 'tasker.desktop');
+
+async function setLinuxAutoLaunch(enabled, startMinimized) {
+  try {
+    if (enabled) {
+      // Create autostart directory if it doesn't exist
+      await fs.mkdir(AUTOSTART_DIR, { recursive: true });
+
+      // Get the path to the executable
+      const execPath = process.execPath;
+
+      // Create desktop entry content
+      const desktopEntry = `[Desktop Entry]
+Type=Application
+Name=Tasker
+Comment=Task Management Application
+Exec=${execPath}${startMinimized ? ' --hidden' : ''}
+Icon=tasker
+Terminal=false
+Categories=Office;ProjectManagement;Productivity;
+X-GNOME-Autostart-enabled=true
+`;
+
+      // Write the desktop entry file
+      await fs.writeFile(AUTOSTART_FILE, desktopEntry, 'utf8');
+      console.log('Linux autostart enabled:', AUTOSTART_FILE);
+    } else {
+      // Remove the autostart file if it exists
+      try {
+        await fs.unlink(AUTOSTART_FILE);
+        console.log('Linux autostart disabled');
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          throw error;
+        }
+        // File doesn't exist, that's fine
+      }
+    }
+  } catch (error) {
+    console.error('Error setting Linux autostart:', error);
+    throw error;
+  }
+}
+
+async function getLinuxAutoLaunch() {
+  try {
+    await fs.access(AUTOSTART_FILE);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 ipcMain.handle('set-auto-launch', async (_event, enabled, startMinimized) => {
   try {
     // Only allow auto-launch for packaged apps
@@ -500,11 +619,16 @@ ipcMain.handle('set-auto-launch', async (_event, enabled, startMinimized) => {
       return { success: false, error: 'Auto-launch only works for built applications. Please build the app first.' };
     }
 
-    app.setLoginItemSettings({
-      openAtLogin: enabled,
-      openAsHidden: startMinimized || false,
-      args: []
-    });
+    if (process.platform === 'linux') {
+      await setLinuxAutoLaunch(enabled, startMinimized);
+    } else {
+      // Windows and macOS
+      app.setLoginItemSettings({
+        openAtLogin: enabled,
+        openAsHidden: startMinimized || false,
+        args: []
+      });
+    }
 
     console.log(`Auto-launch ${enabled ? 'enabled' : 'disabled'}`);
     console.log(`Start minimized ${startMinimized ? 'enabled' : 'disabled'}`);
@@ -517,8 +641,14 @@ ipcMain.handle('set-auto-launch', async (_event, enabled, startMinimized) => {
 
 ipcMain.handle('get-auto-launch', async () => {
   try {
-    const settings = app.getLoginItemSettings();
-    return { success: true, enabled: settings.openAtLogin };
+    let enabled;
+    if (process.platform === 'linux') {
+      enabled = await getLinuxAutoLaunch();
+    } else {
+      const settings = app.getLoginItemSettings();
+      enabled = settings.openAtLogin;
+    }
+    return { success: true, enabled };
   } catch (error) {
     console.error('Error getting auto-launch:', error);
     return { success: false, error: error.message };
