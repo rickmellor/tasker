@@ -421,6 +421,7 @@ async function navigateToView(viewName) {
 
   if (viewName === 'profile') {
     await updateProfileStats();
+    await loadActivityData(); // Refresh activity data when opening dashboard
   } else if (viewName === 'settings') {
     renderFolderList();
     renderStatusesList();
@@ -529,6 +530,11 @@ async function loadFoldersFromStorage() {
     // Initialize goals sidebar if goals are enabled
     if (state.enableGoals) {
       await initializeGoalsSidebar();
+    }
+
+    // Initialize OKRs sidebar if OKRs are enabled
+    if (state.enableOkrs) {
+      initializeOkrsSidebar();
     }
 
     // Load expanded tasks for current folder
@@ -2235,6 +2241,58 @@ async function initializeGoalsSidebar() {
   }
 }
 
+function initializeOkrsSidebar() {
+  console.log('[OKRs] Initializing OKRs sidebar...');
+
+  // Set up expand/collapse handlers for year headers
+  const yearHeaders = document.querySelectorAll('.okr-year-header');
+  console.log('[OKRs] Found', yearHeaders.length, 'year headers');
+
+  yearHeaders.forEach(header => {
+    // Remove any existing listeners by cloning
+    const newHeader = header.cloneNode(true);
+    header.parentNode.replaceChild(newHeader, header);
+
+    newHeader.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const year = newHeader.dataset.year;
+      const content = document.querySelector(`.okr-year-content[data-year-content="${year}"]`);
+
+      console.log('[OKRs] Year header clicked:', year, 'Content found:', !!content);
+
+      if (content) {
+        // Toggle expanded class on both header and content
+        newHeader.classList.toggle('expanded');
+        content.classList.toggle('expanded');
+      }
+    });
+  });
+
+  // Set up expand/collapse handlers for quarter headers
+  const quarterHeaders = document.querySelectorAll('.okr-quarter-header');
+  console.log('[OKRs] Found', quarterHeaders.length, 'quarter headers');
+
+  quarterHeaders.forEach(header => {
+    // Remove any existing listeners by cloning
+    const newHeader = header.cloneNode(true);
+    header.parentNode.replaceChild(newHeader, header);
+
+    newHeader.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const quarter = newHeader.dataset.quarter;
+      const content = document.querySelector(`.okr-quarter-content[data-quarter-content="${quarter}"]`);
+
+      console.log('[OKRs] Quarter header clicked:', quarter, 'Content found:', !!content);
+
+      if (content) {
+        // Toggle expanded class on both header and content
+        newHeader.classList.toggle('expanded');
+        content.classList.toggle('expanded');
+      }
+    });
+  });
+}
+
 async function loadGoals(year = null) {
   try {
     // Clear folder selection when viewing goals
@@ -2746,6 +2804,7 @@ async function toggleTask(taskPath, currentCompleted) {
 
       // Record activity if task was just completed
       if (!currentCompleted && state.currentFolderId) {
+        console.log('[Activity] Task completed, recording activity...');
         recordTaskCompletion(state.currentFolderId).catch(err => {
           console.error('Error recording task completion:', err);
         });
@@ -5438,26 +5497,38 @@ async function initializeAllFoldersInBackground() {
 let globalActivityData = {};
 
 async function recordTaskCompletion(folderId) {
+  // When a task is marked complete, we need to update the activity cache
+  // We'll recompute today's count from actual task completedDate fields
   const folder = state.taskFolders.find(f => f.id === folderId);
   if (!folder) return;
 
   const today = formatDateKey(new Date());
 
   try {
-    // Read current cache
-    const result = await window.electronAPI.activity.readCache(folder.path);
-    const cache = result.success ? result.cache : {};
+    // Recompute today's count from actual tasks
+    const initResult = await window.electronAPI.tasks.initialize(folder.path);
+    if (initResult.success) {
+      const loadResult = await window.electronAPI.tasks.load();
+      if (loadResult.success) {
+        // Count only tasks completed today
+        const todayCompletions = countCompletedTasks(loadResult.tasks, today);
 
-    // Increment today's count
-    cache[today] = (cache[today] || 0) + 1;
+        // Read current cache
+        const cacheResult = await window.electronAPI.activity.readCache(folder.path);
+        const cache = cacheResult.success ? cacheResult.cache : {};
 
-    // Write updated cache
-    await window.electronAPI.activity.writeCache(folder.path, cache);
+        // Update today's count
+        cache[today] = todayCompletions;
 
-    console.log(`[Activity] Recorded completion in ${folder.name} for ${today}`);
+        // Write updated cache
+        await window.electronAPI.activity.writeCache(folder.path, cache);
+
+        console.log(`[Activity] Updated ${folder.name} for ${today}: ${todayCompletions} completions`);
+      }
+    }
 
     // Update global activity data and re-render if on dashboard
-    if (state.currentView === 'profile-view' || state.currentView === 'dashboard') {
+    if (state.currentView === 'profile') {
       await loadActivityData();
     }
   } catch (error) {
@@ -5488,9 +5559,11 @@ async function loadActivityData() {
       if (initResult.success) {
         const loadResult = await window.electronAPI.tasks.load();
         if (loadResult.success) {
-          // Count completed tasks
-          const todayCompletions = countCompletedTasks(loadResult.tasks);
+          // Count only tasks completed TODAY (by checking completedDate)
+          const todayCompletions = countCompletedTasks(loadResult.tasks, today);
           cache[today] = todayCompletions;
+
+          console.log(`[Activity] Recomputed ${folder.name} for ${today}: ${todayCompletions} completions`);
 
           // Update cache with today's computed value
           await window.electronAPI.activity.writeCache(folder.path, cache);
@@ -5519,13 +5592,26 @@ async function loadActivityData() {
   }
 }
 
-function countCompletedTasks(tasks) {
+function countCompletedTasks(tasks, targetDate = null) {
   let count = 0;
+  let debugMatches = [];
 
   const countRecursive = (taskList) => {
     for (const task of taskList) {
       if (!task.deleted && task.completed) {
-        count++;
+        // If targetDate is provided, only count tasks completed on that date
+        if (targetDate) {
+          if (task.completedDate) {
+            const taskCompletionDate = formatDateKey(new Date(task.completedDate));
+            if (taskCompletionDate === targetDate) {
+              count++;
+              debugMatches.push(task.title);
+            }
+          }
+        } else {
+          // No date filter - count all completed tasks
+          count++;
+        }
       }
       if (task.children && task.children.length > 0) {
         countRecursive(task.children);
@@ -5534,6 +5620,11 @@ function countCompletedTasks(tasks) {
   };
 
   countRecursive(tasks);
+
+  if (targetDate && debugMatches.length > 0) {
+    console.log(`[Activity] Counted ${count} tasks for ${targetDate}:`, debugMatches);
+  }
+
   return count;
 }
 
@@ -5733,6 +5824,9 @@ async function handleEnableOkrsChange(event) {
       } else {
         throw new Error(result.error || 'Failed to initialize OKRs storage');
       }
+
+      // Initialize the expand/collapse handlers
+      initializeOkrsSidebar();
     }
 
     // Save the setting

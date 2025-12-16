@@ -398,6 +398,100 @@ body[data-theme="dark"] .sidebar-logo-dark {
   white-space: nowrap;
 }
 
+/* OKR and EMM Hierarchy */
+.okr-year-group {
+  margin-bottom: 0.5rem;
+}
+
+.okr-year-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem 0.75rem 2rem;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.okr-year-header:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.okr-year-expand-icon {
+  font-size: 1.2rem;
+  transition: transform 0.2s ease;
+  color: var(--text-secondary);
+}
+
+.okr-year-header.expanded .okr-year-expand-icon {
+  transform: rotate(90deg);
+}
+
+.okr-year-content {
+  display: none;
+  overflow: hidden;
+}
+
+.okr-year-content.expanded {
+  display: block;
+}
+
+.okr-quarter-group {
+  margin-left: 1rem;
+  padding-left: 0.5rem;
+}
+
+.okr-quarter-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.5rem 2rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.okr-quarter-header:hover {
+  background: var(--bg-hover);
+}
+
+.okr-expand-icon {
+  font-size: 1rem;
+  transition: transform 0.2s ease;
+  color: var(--text-secondary);
+}
+
+.okr-quarter-header.expanded .okr-expand-icon {
+  transform: rotate(90deg);
+}
+
+.okr-quarter-content {
+  display: none;
+  overflow: hidden;
+}
+
+.okr-quarter-content.expanded {
+  display: block;
+}
+
+.okr-placeholder,
+.emm-placeholder {
+  padding-left: 3.5rem;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.okr-placeholder:hover,
+.emm-placeholder:hover {
+  opacity: 1;
+}
+
 /* Folder drag states */
 .folder-nav-item[draggable="true"] {
   cursor: grab;

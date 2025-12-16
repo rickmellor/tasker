@@ -182,6 +182,7 @@ class TaskStorage {
     let priority = 'normal';
     let dueDate = null;
     let created = null;
+    let completedDate = null;
     let status = 'Pending';
     let body = '';
     let inFrontmatter = false;
@@ -219,6 +220,8 @@ class TaskStorage {
           dueDate = line.substring(8).trim() || null;
         } else if (line.startsWith('created:')) {
           created = line.substring(8).trim();
+        } else if (line.startsWith('completedDate:')) {
+          completedDate = line.substring(14).trim() || null;
         } else if (line.startsWith('status:')) {
           status = line.substring(7).trim();
         } else if (line.startsWith('whyItMatters:')) {
@@ -300,6 +303,7 @@ class TaskStorage {
       body: body.trim(),
       priority: priority || 'normal',
       dueDate: dueDate || null,
+      completedDate: completedDate || null,
       status: status || 'Pending',
       created: created || new Date().toISOString(),
       fileName,
@@ -321,9 +325,10 @@ class TaskStorage {
   /**
    * Create task markdown content
    */
-  createTaskContent(title, completed = false, body = '', priority = 'normal', dueDate = null, status = 'Pending', created = null, goalFields = {}) {
+  createTaskContent(title, completed = false, body = '', priority = 'normal', dueDate = null, status = 'Pending', created = null, completedDate = null, goalFields = {}) {
     const createdDate = created || new Date().toISOString();
     const dueDateLine = dueDate ? `dueDate: ${dueDate}` : 'dueDate: ';
+    const completedDateLine = completedDate ? `completedDate: ${completedDate}` : 'completedDate: ';
 
     // Build frontmatter with standard fields
     let frontmatter = `---
@@ -331,6 +336,7 @@ completed: ${completed}
 title: ${title}
 priority: ${priority}
 ${dueDateLine}
+${completedDateLine}
 status: ${status}
 created: ${createdDate}`;
 
@@ -431,6 +437,7 @@ ${body}
     const body = updates.body !== undefined ? updates.body : task.body;
     const priority = updates.priority !== undefined ? updates.priority : task.priority;
     const dueDate = updates.dueDate !== undefined ? updates.dueDate : task.dueDate;
+    let completedDate = updates.completedDate !== undefined ? updates.completedDate : task.completedDate;
     let status = updates.status !== undefined ? updates.status : task.status;
 
     // Goal-specific fields
@@ -451,6 +458,17 @@ ${body}
       status = updates.completed ? 'Completed' : 'Pending';
     }
 
+    // Set completedDate when marking complete (if not already provided in updates)
+    if (updates.completedDate === undefined) {
+      if (completed && !task.completed) {
+        // Task is being marked complete - set completion date to now
+        completedDate = new Date().toISOString();
+      } else if (!completed && task.completed) {
+        // Task is being marked incomplete - clear completion date
+        completedDate = null;
+      }
+    }
+
     const goalFields = {
       whyItMatters,
       successCriteria,
@@ -461,10 +479,10 @@ ${body}
       goalYear
     };
 
-    const content = this.createTaskContent(title, completed, body, priority, dueDate, status, task.created, goalFields);
+    const content = this.createTaskContent(title, completed, body, priority, dueDate, status, task.created, completedDate, goalFields);
     await fs.writeFile(taskPath, content, 'utf-8');
 
-    return { ...task, title, completed, body, priority, dueDate, status, whyItMatters, successCriteria, keyMilestones, linkedTasks, goalStatus, confidenceLevel, goalYear };
+    return { ...task, title, completed, body, priority, dueDate, completedDate, status, whyItMatters, successCriteria, keyMilestones, linkedTasks, goalStatus, confidenceLevel, goalYear };
   }
 
   /**

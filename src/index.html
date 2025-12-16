@@ -37,15 +37,77 @@
               </div>
             </div>
 
-            <!-- OKRs Section -->
+            <!-- OKRs and EMM Section -->
             <div class="sidebar-section" id="okrs-section" style="display: none;">
               <div class="sidebar-section-header" data-section="okrs">
                 <span class="sidebar-section-icon material-icons">expand_more</span>
-                <span class="sidebar-section-title">OKRs</span>
+                <span class="sidebar-section-title">OKRs and EMM</span>
               </div>
               <div class="sidebar-section-content" id="sidebar-okrs">
-                <div class="sidebar-item" data-type="okrs">
-                  <span class="sidebar-item-text">Objectives & Key Results</span>
+                <!-- Years will be populated here -->
+                <div class="okr-year-group">
+                  <div class="okr-year-header" data-year="2025">
+                    <span class="material-icons okr-year-expand-icon">chevron_right</span>
+                    <span>2025</span>
+                  </div>
+                  <div class="okr-year-content" data-year-content="2025">
+                  <div class="okr-quarter-group">
+                    <div class="okr-quarter-header" data-quarter="q1">
+                      <span class="material-icons okr-expand-icon">chevron_right</span>
+                      <span>Q1</span>
+                    </div>
+                    <div class="okr-quarter-content" data-quarter-content="q1">
+                      <div class="sidebar-item okr-placeholder">
+                        <span class="sidebar-item-text">OKRs</span>
+                      </div>
+                      <div class="sidebar-item emm-placeholder">
+                        <span class="sidebar-item-text">EMMs</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="okr-quarter-group">
+                    <div class="okr-quarter-header" data-quarter="q2">
+                      <span class="material-icons okr-expand-icon">chevron_right</span>
+                      <span>Q2</span>
+                    </div>
+                    <div class="okr-quarter-content" data-quarter-content="q2">
+                      <div class="sidebar-item okr-placeholder">
+                        <span class="sidebar-item-text">OKRs</span>
+                      </div>
+                      <div class="sidebar-item emm-placeholder">
+                        <span class="sidebar-item-text">EMMs</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="okr-quarter-group">
+                    <div class="okr-quarter-header" data-quarter="q3">
+                      <span class="material-icons okr-expand-icon">chevron_right</span>
+                      <span>Q3</span>
+                    </div>
+                    <div class="okr-quarter-content" data-quarter-content="q3">
+                      <div class="sidebar-item okr-placeholder">
+                        <span class="sidebar-item-text">OKRs</span>
+                      </div>
+                      <div class="sidebar-item emm-placeholder">
+                        <span class="sidebar-item-text">EMMs</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="okr-quarter-group">
+                    <div class="okr-quarter-header" data-quarter="q4">
+                      <span class="material-icons okr-expand-icon">chevron_right</span>
+                      <span>Q4</span>
+                    </div>
+                    <div class="okr-quarter-content" data-quarter-content="q4">
+                      <div class="sidebar-item okr-placeholder">
+                        <span class="sidebar-item-text">OKRs</span>
+                      </div>
+                      <div class="sidebar-item emm-placeholder">
+                        <span class="sidebar-item-text">EMMs</span>
+                      </div>
+                    </div>
+                  </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -994,9 +1056,9 @@
                 <div class="setting-item">
                   <label for="enable-okrs-checkbox">
                     <input type="checkbox" id="enable-okrs-checkbox" style="width: auto; margin-right: 0.5rem;" />
-                    Enable OKR Tracking
+                    Enable OKR and EMM Tracking
                   </label>
-                  <p class="setting-description">Track Objectives and Key Results alongside your tasks. OKRs will appear in the sidebar and can be used for strategic planning.</p>
+                  <p class="setting-description">Track Objectives and Key Results (OKRs) and Executive Monthly Metrics (EMMs) alongside your tasks. Organized by year and quarter in the sidebar for strategic planning.</p>
                 </div>
 
                 <div class="setting-item">
