@@ -59,6 +59,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     permanentlyDelete: (taskPath) => ipcRenderer.invoke('tasks:permanently-delete', taskPath)
   },
 
+  // Activity Cache
+  activity: {
+    readCache: (folderPath) => ipcRenderer.invoke('activity:read-cache', folderPath),
+    writeCache: (folderPath, cache) => ipcRenderer.invoke('activity:write-cache', folderPath, cache)
+  },
+
   // OKRs Storage
   okrs: {
     initialize: () => ipcRenderer.invoke('okrs:initialize'),

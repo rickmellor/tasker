@@ -54,6 +54,7 @@ const state = {
   theme: 'auto',
   taskFolders: [], // Array of {id, name, path} objects
   currentFolderId: null, // Currently active folder ID
+  dashboardFolderFilter: [], // Array of folder IDs to include in dashboard (empty = all)
   folderErrors: new Map(), // Track folder load errors: folderId -> error message
   expandedTasks: new Set(), // Track which tasks are expanded
   draggedTask: null, // Track task being dragged
@@ -144,6 +145,11 @@ const elements = {
   statTotal: document.getElementById('stat-total'),
   statCompleted: document.getElementById('stat-completed'),
   statPending: document.getElementById('stat-pending'),
+  dashboardFolderFilterBtn: document.getElementById('dashboard-folder-filter-btn'),
+  dashboardFolderFilterLabel: document.getElementById('dashboard-folder-filter-label'),
+  dashboardFolderFilterDropdown: document.getElementById('dashboard-folder-filter-dropdown'),
+  dashboardFolderFilterOptions: document.getElementById('dashboard-folder-filter-options'),
+  dashboardFilterAll: document.getElementById('dashboard-filter-all'),
 
   // Folder management
   sidebarFolders: document.getElementById('sidebar-folders'),
@@ -358,8 +364,22 @@ async function initializeApp() {
   // Navigate to tasks view
   navigateToView('tasks');
 
-  // Update dashboard stats
+  // Update dashboard stats (uses cached stats if available)
   await updateProfileStats();
+
+  // Initialize activity tracker
+  initializeActivityTracker();
+
+  // Initialize dashboard folder filter
+  initializeDashboardFolderFilter();
+
+  // Start background initialization of all folders (non-blocking)
+  // This will download Dropbox folders and cache their stats
+  setTimeout(() => {
+    initializeAllFoldersInBackground().catch(err => {
+      console.error('[Background Init] Failed:', err);
+    });
+  }, 1000); // Small delay to let UI fully load first
 }
 
 // ========================================
@@ -468,7 +488,15 @@ async function loadFoldersFromStorage() {
   const result = await window.electronAPI.config.read();
   if (result.success) {
     state.taskFolders = result.config.taskFolders || [];
+
+    // Initialize syncState for Dropbox folders - always reset to not-synced on startup
+    state.taskFolders.forEach(folder => {
+      if (folder.storageType === 'dropbox') {
+        folder.syncState = 'not-synced';
+      }
+    });
     state.currentFolderId = result.config.currentFolderId || null;
+    state.dashboardFolderFilter = result.config.dashboardFolderFilter || [];
     state.theme = result.config.theme || 'auto';
 
     // Load filter and sort settings
@@ -547,6 +575,7 @@ async function saveAllSettings() {
     await window.electronAPI.config.update({
       taskFolders: state.taskFolders,
       currentFolderId: state.currentFolderId,
+      dashboardFolderFilter: state.dashboardFolderFilter,
       theme: state.theme,
       activeFilters: Array.from(state.activeFilters),
       sortOrder: state.sortOrder,
@@ -963,14 +992,22 @@ async function saveAddFolder() {
     // Add dropboxPath for Dropbox folders
     if (storageType === 'dropbox') {
       newFolder.dropboxPath = dropboxPath;
+      newFolder.syncState = 'synced'; // Just synced during creation
     }
 
     state.taskFolders.push(newFolder);
     state.currentFolderId = newFolder.id;
 
+    // If showing all folders, add new folder to filter
+    if (state.dashboardFolderFilter.length === state.taskFolders.length - 1) {
+      state.dashboardFolderFilter.push(newFolder.id);
+    }
+
     saveFoldersToStorage();
     renderSidebarFolders();
     renderFolderList();
+    renderDashboardFolderOptions();
+    await updateProfileStats(); // Update dashboard with new folder
 
     await loadTasks();
 
@@ -1008,6 +1045,9 @@ async function removeFolder(folderId, forcePermDelete = false) {
   // Remove folder from state
   state.taskFolders = state.taskFolders.filter(f => f.id !== folderId);
 
+  // Remove from dashboard filter
+  state.dashboardFolderFilter = state.dashboardFolderFilter.filter(id => id !== folderId);
+
   // If we removed the current folder, switch to another one or clear
   if (state.currentFolderId === folderId) {
     if (state.taskFolders.length > 0) {
@@ -1023,6 +1063,8 @@ async function removeFolder(folderId, forcePermDelete = false) {
   saveFoldersToStorage();
   renderSidebarFolders();
   renderFolderList();
+  renderDashboardFolderOptions();
+  await updateProfileStats(); // Update dashboard after removing folder
 }
 
 async function renameFolder(folderId, newName) {
@@ -1032,6 +1074,7 @@ async function renameFolder(folderId, newName) {
     saveFoldersToStorage();
     renderSidebarFolders();
     renderFolderList();
+    renderDashboardFolderOptions();
   }
 }
 
@@ -1087,6 +1130,12 @@ async function switchFolder(folderId) {
 
   const folder = getCurrentFolder();
   if (folder) {
+    // For Dropbox folders, set syncing state
+    if (folder.storageType === 'dropbox') {
+      folder.syncState = 'syncing';
+      renderSidebarFolders();
+    }
+
     // Tell the main process about the folder switch so it can set up DropboxStorage if needed
     const setFolderResult = await window.electronAPI.tasks.setCurrentFolder({
       id: folder.id,
@@ -1099,6 +1148,9 @@ async function switchFolder(folderId) {
     if (!setFolderResult.success) {
       console.error('Failed to set current folder:', setFolderResult.error);
       state.folderErrors.set(folder.id, setFolderResult.error);
+      if (folder.storageType === 'dropbox') {
+        folder.syncState = 'not-synced';
+      }
       renderSidebarFolders();
 
       // Still try to initialize and load, but it will likely fail
@@ -1110,10 +1162,18 @@ async function switchFolder(folderId) {
     // Initialize the folder before loading tasks
     const initResult = await window.electronAPI.tasks.initialize(folder.path);
     if (initResult.success) {
+      // Mark Dropbox folders as synced after successful initialization
+      if (folder.storageType === 'dropbox') {
+        folder.syncState = 'synced';
+        renderSidebarFolders();
+      }
       await loadTasks();
     } else {
       // Store initialization error
       state.folderErrors.set(folder.id, initResult.error || 'Failed to initialize folder');
+      if (folder.storageType === 'dropbox') {
+        folder.syncState = 'not-synced';
+      }
       renderSidebarFolders();
       state.tasks = [];
       renderTasks();
@@ -1142,15 +1202,27 @@ function renderSidebarFolders() {
     const isDropbox = folder.storageType === 'dropbox';
     const hasError = state.folderErrors.has(folder.id);
     const errorMessage = hasError ? state.folderErrors.get(folder.id) : '';
+    const syncState = folder.syncState || 'not-synced'; // 'synced', 'not-synced', 'syncing'
+
+    // Determine cloud icon based on sync state
+    let cloudIcon = '';
+    if (isDropbox) {
+      if (syncState === 'syncing') {
+        cloudIcon = `<span class="folder-sync-spinner" title="Syncing with Dropbox..."></span>`;
+      } else if (syncState === 'synced') {
+        cloudIcon = `<span class="material-icons folder-cloud-icon" title="Synced with Dropbox">cloud</span>`;
+      } else {
+        cloudIcon = `<span class="material-icons folder-cloud-icon folder-cloud-outline" title="Not synced">cloud_queue</span>`;
+      }
+    }
+
     return `
       <button class="nav-item folder-nav-item ${isActive ? 'active' : ''} ${hasError ? 'folder-error' : ''}"
               data-folder-id="${folder.id}"
               draggable="true">
         <span class="material-icons nav-icon">folder</span>
         <span class="nav-label">${escapeHtml(folder.name)}</span>
-        ${isDropbox ? `
-          <span class="material-icons folder-cloud-icon" title="Dropbox folder">cloud</span>
-        ` : ''}
+        ${cloudIcon}
         ${folder.versionControl ? `
           <img src="../assets/git-branch-outline.svg" alt="Git" class="folder-git-icon folder-git-icon-light" title="Version control enabled" />
           <img src="../assets/git-branch-outline-white.svg" alt="Git" class="folder-git-icon folder-git-icon-dark" title="Version control enabled" />
@@ -2061,6 +2133,13 @@ async function loadTasks() {
       updateDeletedCount();
       await loadTimeline(); // Load git timeline
 
+      // Update stats cache for current folder (non-blocking)
+      if (state.currentFolderId) {
+        updateFolderStatsCache(state.currentFolderId).catch(err => {
+          console.error('[Stats Cache] Failed to update cache:', err);
+        });
+      }
+
       // Clear any previous error for this folder
       if (state.currentFolderId) {
         state.folderErrors.delete(state.currentFolderId);
@@ -2665,6 +2744,13 @@ async function toggleTask(taskPath, currentCompleted) {
     if (result.success) {
       await loadTasks();
 
+      // Record activity if task was just completed
+      if (!currentCompleted && state.currentFolderId) {
+        recordTaskCompletion(state.currentFolderId).catch(err => {
+          console.error('Error recording task completion:', err);
+        });
+      }
+
       // Update embeddings with new task data (fire-and-forget, don't block UI)
       if (result.task) {
         updateTaskEmbeddings(result.task).catch(err => {
@@ -3204,6 +3290,9 @@ function closeGoalModal() {
 }
 
 async function saveGoalModal() {
+  // Save any milestone changes from DOM before reading the data
+  saveMilestonesFromDOM();
+
   const title = elements.goalModalTitle.value.trim();
   if (!title) {
     alert('Please enter a goal title');
@@ -4983,27 +5072,219 @@ function handleDragEnd(e) {
 // ========================================
 // Profile Stats
 // ========================================
+function initializeDashboardFolderFilter() {
+  // Populate folder options
+  renderDashboardFolderOptions();
+
+  // Toggle dropdown
+  if (elements.dashboardFolderFilterBtn) {
+    elements.dashboardFolderFilterBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const dropdown = elements.dashboardFolderFilterDropdown;
+      const isVisible = dropdown.style.display === 'block';
+      dropdown.style.display = isVisible ? 'none' : 'block';
+    });
+  }
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.custom-select-wrapper')) {
+      if (elements.dashboardFolderFilterDropdown) {
+        elements.dashboardFolderFilterDropdown.style.display = 'none';
+      }
+    }
+  });
+
+  // Handle "All" checkbox
+  if (elements.dashboardFilterAll) {
+    elements.dashboardFilterAll.addEventListener('change', async (e) => {
+      e.stopPropagation(); // Prevent dropdown from closing
+
+      const checkboxes = elements.dashboardFolderFilterOptions.querySelectorAll('input[type="checkbox"]');
+
+      if (e.target.checked) {
+        // Select all folders - use explicit list of all folder IDs
+        state.dashboardFolderFilter = state.taskFolders.map(f => f.id);
+        checkboxes.forEach(cb => cb.checked = true);
+      } else {
+        // Deselect all folders - empty array
+        state.dashboardFolderFilter = [];
+        checkboxes.forEach(cb => cb.checked = false);
+      }
+
+      console.log('[Dashboard Filter] All checkbox changed:', e.target.checked, 'Filter:', state.dashboardFolderFilter);
+      updateDashboardFolderFilterLabel();
+      await saveAllSettings();
+      await updateProfileStats();
+      await loadActivityData(); // Update activity tracker
+    });
+  }
+}
+
+function renderDashboardFolderOptions() {
+  if (!elements.dashboardFolderFilterOptions) return;
+
+  elements.dashboardFolderFilterOptions.innerHTML = '';
+
+  // Initialize filter to all folders if empty on first load
+  if (state.dashboardFolderFilter.length === 0 && state.taskFolders.length > 0) {
+    state.dashboardFolderFilter = state.taskFolders.map(f => f.id);
+  }
+
+  state.taskFolders.forEach(folder => {
+    const option = document.createElement('div');
+    option.className = 'filter-option';
+    option.dataset.folderId = folder.id;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = `dashboard-filter-${folder.id}`;
+    checkbox.checked = state.dashboardFolderFilter.includes(folder.id);
+
+    const label = document.createElement('label');
+    label.htmlFor = `dashboard-filter-${folder.id}`;
+    label.textContent = folder.name;
+
+    checkbox.addEventListener('change', async (e) => {
+      e.stopPropagation(); // Prevent dropdown from closing
+
+      if (checkbox.checked) {
+        // Add folder to filter
+        if (!state.dashboardFolderFilter.includes(folder.id)) {
+          state.dashboardFolderFilter.push(folder.id);
+        }
+      } else {
+        // Remove folder from filter
+        state.dashboardFolderFilter = state.dashboardFolderFilter.filter(id => id !== folder.id);
+      }
+
+      // Update "All" checkbox
+      if (elements.dashboardFilterAll) {
+        elements.dashboardFilterAll.checked = state.dashboardFolderFilter.length === state.taskFolders.length;
+      }
+
+      console.log('[Dashboard Filter] Folder checkbox changed:', folder.name, checkbox.checked, 'Filter:', state.dashboardFolderFilter);
+      updateDashboardFolderFilterLabel();
+      await saveAllSettings();
+      await updateProfileStats();
+      await loadActivityData(); // Update activity tracker
+    });
+
+    option.appendChild(checkbox);
+    option.appendChild(label);
+    elements.dashboardFolderFilterOptions.appendChild(option);
+  });
+
+  // Update "All" checkbox state
+  if (elements.dashboardFilterAll) {
+    elements.dashboardFilterAll.checked = state.dashboardFolderFilter.length === state.taskFolders.length;
+  }
+
+  updateDashboardFolderFilterLabel();
+}
+
+function updateDashboardFolderFilterLabel() {
+  if (!elements.dashboardFolderFilterLabel) return;
+
+  if (state.dashboardFolderFilter.length === 0) {
+    elements.dashboardFolderFilterLabel.textContent = 'No Folders';
+  } else if (state.dashboardFolderFilter.length === state.taskFolders.length) {
+    elements.dashboardFolderFilterLabel.textContent = 'All Folders';
+  } else if (state.dashboardFolderFilter.length === 1) {
+    const folder = state.taskFolders.find(f => f.id === state.dashboardFolderFilter[0]);
+    elements.dashboardFolderFilterLabel.textContent = folder ? folder.name : '1 Folder';
+  } else {
+    elements.dashboardFolderFilterLabel.textContent = `${state.dashboardFolderFilter.length} Folders`;
+  }
+}
+
+async function updateFolderStatsCache(folderId) {
+  const folder = state.taskFolders.find(f => f.id === folderId);
+  if (!folder) return;
+
+  try {
+    // Save current folder
+    const currentFolder = getCurrentFolder();
+
+    // Initialize and load tasks from this folder
+    const initResult = await window.electronAPI.tasks.initialize(folder.path);
+    if (initResult.success) {
+      const loadResult = await window.electronAPI.tasks.load();
+      if (loadResult.success) {
+        const stats = countTasks(loadResult.tasks);
+
+        // Update cached stats on folder object
+        folder.stats = {
+          total: stats.total,
+          completed: stats.completed,
+          pending: stats.pending,
+          lastUpdated: new Date().toISOString()
+        };
+
+        console.log(`[Stats Cache] Updated ${folder.name}:`, folder.stats);
+
+        // Save to config
+        await saveFoldersToStorage();
+      }
+    }
+
+    // Restore the current folder
+    if (currentFolder) {
+      await window.electronAPI.tasks.initialize(currentFolder.path);
+    }
+  } catch (error) {
+    console.error(`Error updating stats cache for folder ${folder.name}:`, error);
+  }
+}
+
 async function updateProfileStats() {
-  // Aggregate stats across all folders
+  console.log('[Dashboard] Updating stats. Filter:', state.dashboardFolderFilter);
+
+  // Determine which folders to include
+  const foldersToInclude = state.taskFolders.filter(f => state.dashboardFolderFilter.includes(f.id));
+
+  console.log('[Dashboard] Folders to include:', foldersToInclude.map(f => f.name));
+
+  // Aggregate stats across selected folders using cached stats
   let totalCount = 0;
   let completedCount = 0;
 
-  for (const folder of state.taskFolders) {
-    try {
-      // Initialize and load tasks from this folder
-      const initResult = await window.electronAPI.tasks.initialize(folder.path);
-      if (initResult.success) {
-        const loadResult = await window.electronAPI.tasks.load();
-        if (loadResult.success) {
-          const stats = countTasks(loadResult.tasks);
-          totalCount += stats.total;
-          completedCount += stats.completed;
+  for (const folder of foldersToInclude) {
+    if (folder.stats) {
+      // Use cached stats
+      console.log(`[Dashboard] Using cached stats for ${folder.name}:`, folder.stats);
+      totalCount += folder.stats.total;
+      completedCount += folder.stats.completed;
+    } else {
+      // Fallback: calculate live if no cache (shouldn't happen often)
+      console.log(`[Dashboard] No cached stats for ${folder.name}, calculating live...`);
+      try {
+        const initResult = await window.electronAPI.tasks.initialize(folder.path);
+        if (initResult.success) {
+          const loadResult = await window.electronAPI.tasks.load();
+          if (loadResult.success) {
+            const stats = countTasks(loadResult.tasks);
+            console.log(`[Dashboard] Calculated stats for ${folder.name}:`, stats);
+            totalCount += stats.total;
+            completedCount += stats.completed;
+
+            // Cache the stats we just calculated
+            folder.stats = {
+              total: stats.total,
+              completed: stats.completed,
+              pending: stats.pending,
+              lastUpdated: new Date().toISOString()
+            };
+            await saveFoldersToStorage();
+          }
         }
+      } catch (error) {
+        console.error(`Error calculating stats for folder ${folder.name}:`, error);
       }
-    } catch (error) {
-      console.error(`Error loading stats for folder ${folder.name}:`, error);
     }
   }
+
+  console.log('[Dashboard] Final stats:', { totalCount, completedCount, pending: totalCount - completedCount });
 
   elements.statTotal.textContent = totalCount;
   elements.statCompleted.textContent = completedCount;
@@ -5042,6 +5323,348 @@ function countTasks(tasks) {
     completed,
     pending: total - completed
   };
+}
+
+// ========================================
+// Background Folder Initialization
+// ========================================
+async function initializeAllFoldersInBackground() {
+  console.log('[Background Init] Starting background initialization of all folders...');
+
+  // Process folders one at a time to avoid overwhelming the system
+  for (const folder of state.taskFolders) {
+    try {
+      console.log(`[Background Init] Initializing folder: ${folder.name} (Type: ${folder.storageType || 'local'})`);
+
+      // For Dropbox folders, sync from Dropbox first
+      if (folder.storageType === 'dropbox' && folder.dropboxPath) {
+        console.log(`[Background Init] Syncing Dropbox folder: ${folder.dropboxPath}`);
+
+        // Set syncing state and update sidebar
+        folder.syncState = 'syncing';
+        renderSidebarFolders();
+
+        const syncResult = await window.electronAPI.dropbox.syncPull(folder.id, folder.dropboxPath);
+
+        if (!syncResult.success) {
+          console.warn(`[Background Init] Failed to sync ${folder.name} from Dropbox:`, syncResult.error);
+          folder.syncState = 'not-synced';
+          renderSidebarFolders();
+          continue; // Skip to next folder
+        }
+
+        console.log(`[Background Init] Dropbox sync successful for ${folder.name}`);
+        folder.syncState = 'synced';
+        renderSidebarFolders();
+      }
+
+      // Set current folder for task operations
+      const setFolderResult = await window.electronAPI.tasks.setCurrentFolder({
+        id: folder.id,
+        path: folder.path,
+        storageType: folder.storageType || 'local',
+        dropboxPath: folder.dropboxPath || null
+      });
+
+      if (!setFolderResult.success) {
+        console.warn(`[Background Init] Failed to set folder ${folder.name}:`, setFolderResult.error);
+        continue;
+      }
+
+      // Initialize the folder
+      const initResult = await window.electronAPI.tasks.initialize(folder.path);
+
+      if (initResult.success) {
+        // Load tasks to calculate stats
+        const loadResult = await window.electronAPI.tasks.load();
+
+        if (loadResult.success) {
+          const stats = countTasks(loadResult.tasks);
+
+          // Cache the stats
+          folder.stats = {
+            total: stats.total,
+            completed: stats.completed,
+            pending: stats.pending,
+            lastUpdated: new Date().toISOString()
+          };
+
+          console.log(`[Background Init] Cached stats for ${folder.name}:`, folder.stats);
+        } else {
+          console.warn(`[Background Init] Failed to load tasks for ${folder.name}:`, loadResult.error);
+        }
+      } else {
+        console.warn(`[Background Init] Failed to initialize ${folder.name}:`, initResult.error);
+      }
+
+      // Small delay between folders to avoid overwhelming the system
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+    } catch (error) {
+      console.error(`[Background Init] Error initializing ${folder.name}:`, error);
+      // Continue with next folder even if this one fails
+    }
+  }
+
+  // Save all cached stats
+  await saveFoldersToStorage();
+
+  console.log('[Background Init] Background initialization complete');
+
+  // Update dashboard stats with newly cached data
+  await updateProfileStats();
+
+  // Restore the current folder if one was selected
+  const currentFolder = getCurrentFolder();
+  if (currentFolder) {
+    const setFolderResult = await window.electronAPI.tasks.setCurrentFolder({
+      id: currentFolder.id,
+      path: currentFolder.path,
+      storageType: currentFolder.storageType || 'local',
+      dropboxPath: currentFolder.dropboxPath || null
+    });
+
+    if (setFolderResult.success) {
+      await window.electronAPI.tasks.initialize(currentFolder.path);
+      await loadTasks();
+    }
+  }
+}
+
+// ========================================
+// Activity Tracker
+// ========================================
+// Store aggregated activity data for current year
+let globalActivityData = {};
+
+async function recordTaskCompletion(folderId) {
+  const folder = state.taskFolders.find(f => f.id === folderId);
+  if (!folder) return;
+
+  const today = formatDateKey(new Date());
+
+  try {
+    // Read current cache
+    const result = await window.electronAPI.activity.readCache(folder.path);
+    const cache = result.success ? result.cache : {};
+
+    // Increment today's count
+    cache[today] = (cache[today] || 0) + 1;
+
+    // Write updated cache
+    await window.electronAPI.activity.writeCache(folder.path, cache);
+
+    console.log(`[Activity] Recorded completion in ${folder.name} for ${today}`);
+
+    // Update global activity data and re-render if on dashboard
+    if (state.currentView === 'profile-view' || state.currentView === 'dashboard') {
+      await loadActivityData();
+    }
+  } catch (error) {
+    console.error(`[Activity] Failed to record completion:`, error);
+  }
+}
+
+async function loadActivityData() {
+  const currentYear = new Date().getFullYear();
+  const today = formatDateKey(new Date());
+
+  // Determine which folders to include based on dashboard filter
+  const foldersToInclude = state.taskFolders.filter(f =>
+    state.dashboardFolderFilter.length === 0 || state.dashboardFolderFilter.includes(f.id)
+  );
+
+  // Aggregate activity data across all selected folders
+  const aggregatedData = {};
+
+  for (const folder of foldersToInclude) {
+    try {
+      // Read cache from disk
+      const result = await window.electronAPI.activity.readCache(folder.path);
+      const cache = result.success ? result.cache : {};
+
+      // For current day, compute from actual tasks instead of using cache
+      const initResult = await window.electronAPI.tasks.initialize(folder.path);
+      if (initResult.success) {
+        const loadResult = await window.electronAPI.tasks.load();
+        if (loadResult.success) {
+          // Count completed tasks
+          const todayCompletions = countCompletedTasks(loadResult.tasks);
+          cache[today] = todayCompletions;
+
+          // Update cache with today's computed value
+          await window.electronAPI.activity.writeCache(folder.path, cache);
+        }
+      }
+
+      // Aggregate into global data
+      Object.keys(cache).forEach(dateKey => {
+        aggregatedData[dateKey] = (aggregatedData[dateKey] || 0) + cache[dateKey];
+      });
+    } catch (error) {
+      console.error(`[Activity] Failed to load activity for ${folder.name}:`, error);
+    }
+  }
+
+  globalActivityData = aggregatedData;
+
+  // Re-render activity grid with new data
+  const selectedYear = document.querySelector('.year-option.active')?.dataset.year || currentYear;
+  renderActivityGrid(parseInt(selectedYear));
+
+  // Restore current folder
+  const currentFolder = getCurrentFolder();
+  if (currentFolder) {
+    await window.electronAPI.tasks.initialize(currentFolder.path);
+  }
+}
+
+function countCompletedTasks(tasks) {
+  let count = 0;
+
+  const countRecursive = (taskList) => {
+    for (const task of taskList) {
+      if (!task.deleted && task.completed) {
+        count++;
+      }
+      if (task.children && task.children.length > 0) {
+        countRecursive(task.children);
+      }
+    }
+  };
+
+  countRecursive(tasks);
+  return count;
+}
+
+function initializeActivityTracker() {
+  const currentYear = new Date().getFullYear();
+
+  // Update year options
+  const yearOptions = document.querySelectorAll('.year-option');
+  yearOptions.forEach(option => {
+    const year = parseInt(option.dataset.year);
+    option.textContent = year;
+
+    // Set current year as active
+    if (year === currentYear) {
+      option.classList.add('active');
+    } else {
+      option.classList.remove('active');
+    }
+
+    // Add click handler
+    option.addEventListener('click', () => {
+      yearOptions.forEach(opt => opt.classList.remove('active'));
+      option.classList.add('active');
+      renderActivityGrid(year);
+    });
+  });
+
+  // Load activity data and render grid for current year
+  loadActivityData().catch(err => {
+    console.error('[Activity] Failed to load activity data:', err);
+    // Render empty grid on error
+    renderActivityGrid(currentYear);
+  });
+}
+
+function renderActivityGrid(year) {
+  const gridContainer = document.getElementById('activity-grid');
+  const monthLabelsContainer = document.getElementById('activity-month-labels');
+
+  if (!gridContainer || !monthLabelsContainer) return;
+
+  // Clear existing grid
+  gridContainer.innerHTML = '';
+  monthLabelsContainer.innerHTML = '';
+
+  // Calculate date range (52 weeks back from end of year)
+  const endDate = new Date(year, 11, 31); // Dec 31 of selected year
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - (52 * 7 - 1)); // 52 weeks = 364 days
+
+  // Adjust start date to Monday
+  const dayOfWeek = startDate.getDay();
+  const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  startDate.setDate(startDate.getDate() - daysToMonday);
+
+  // Use global activity data (real data from cache)
+  const activityData = globalActivityData;
+
+  // Track months for labels
+  const monthPositions = [];
+  let lastMonth = -1;
+  let weekIndex = 0;
+
+  // Generate 52 weeks x 7 days
+  for (let week = 0; week < 52; week++) {
+    for (let day = 0; day < 7; day++) {
+      const currentDate = new Date(startDate);
+      currentDate.setDate(startDate.getDate() + (week * 7) + day);
+
+      // Track month boundaries
+      const month = currentDate.getMonth();
+      if (month !== lastMonth && day === 0) {
+        monthPositions.push({
+          month: month,
+          weekIndex: week,
+          left: week * 14 // 11px width + 3px gap
+        });
+        lastMonth = month;
+      }
+
+      const dateKey = formatDateKey(currentDate);
+      const count = activityData[dateKey] || 0;
+
+      // Map count to level (0-4)
+      let level = 0;
+      if (count === 0) level = 0;
+      else if (count === 1) level = 1;
+      else if (count <= 3) level = 2;
+      else if (count <= 5) level = 3;
+      else level = 4; // 6+
+
+      const cell = document.createElement('div');
+      cell.className = `activity-cell level-${level}`;
+      cell.dataset.date = dateKey;
+      cell.dataset.count = count;
+      cell.title = `${formatDateForTooltip(currentDate)}: ${count} ${count === 1 ? 'completion' : 'completions'}`;
+
+      gridContainer.appendChild(cell);
+    }
+  }
+
+  // Add month labels
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  monthPositions.forEach(pos => {
+    const label = document.createElement('div');
+    label.className = 'month-label';
+    label.textContent = monthNames[pos.month];
+    label.style.left = `${pos.left}px`;
+    monthLabelsContainer.appendChild(label);
+  });
+
+  // Update activity count
+  const totalActivity = Object.values(activityData).reduce((sum, val) => sum + val, 0);
+  const activityCountEl = document.getElementById('activity-count');
+  if (activityCountEl) {
+    activityCountEl.textContent = `${totalActivity} ${totalActivity === 1 ? 'completion' : 'completions'}`;
+  }
+}
+
+
+function formatDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateForTooltip(date) {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${days[date.getDay()]}, ${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
 }
 
 // ========================================
@@ -5346,13 +5969,16 @@ function setupKeyboardShortcuts() {
       return;
     }
 
-    // Handle Ctrl+X or Ctrl+Alt+F4 to exit app without minimizing to tray (works anywhere)
+    // Handle Ctrl+X to exit app without minimizing to tray (but not in input fields)
     if ((e.ctrlKey || e.metaKey) && (e.key === 'x' || e.key === 'X')) {
-      e.preventDefault();
-      if (window.electronAPI.quitApp) {
-        window.electronAPI.quitApp();
+      // Don't exit if user is in an input field (let them cut text)
+      if (!e.target.matches('input, textarea, [contenteditable="true"]')) {
+        e.preventDefault();
+        if (window.electronAPI.quitApp) {
+          window.electronAPI.quitApp();
+        }
+        return;
       }
-      return;
     }
 
     // Handle Ctrl+Alt+F4 to exit app

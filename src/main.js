@@ -1098,6 +1098,42 @@ ipcMain.handle('tasks:permanently-delete', async (_event, taskPath) => {
   }
 });
 
+// Activity Cache IPC handlers
+ipcMain.handle('activity:read-cache', async (_event, folderPath) => {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const cachePath = path.join(folderPath, '.activity-cache.json');
+
+    try {
+      const content = await fs.readFile(cachePath, 'utf8');
+      const cache = JSON.parse(content);
+      return { success: true, cache };
+    } catch (error) {
+      // File doesn't exist or can't be read, return empty cache
+      if (error.code === 'ENOENT') {
+        return { success: true, cache: {} };
+      }
+      throw error;
+    }
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('activity:write-cache', async (_event, folderPath, cache) => {
+  try {
+    const fs = require('fs').promises;
+    const path = require('path');
+    const cachePath = path.join(folderPath, '.activity-cache.json');
+
+    await fs.writeFile(cachePath, JSON.stringify(cache, null, 2), 'utf8');
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 // Config Storage IPC handlers
 
 ipcMain.handle('config:read', async () => {

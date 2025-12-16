@@ -258,6 +258,27 @@
           <div id="profile-view" class="view">
             <header class="view-header">
               <h1>Dashboard</h1>
+              <div class="header-actions">
+                <div class="dashboard-folder-filter-container">
+                  <label for="dashboard-folder-filter" style="font-size: 0.9rem; color: var(--text-secondary); margin-right: 0.5rem;">Folders:</label>
+                  <div class="custom-select-wrapper">
+                    <button id="dashboard-folder-filter-btn" class="custom-select-btn">
+                      <span id="dashboard-folder-filter-label">All Folders</span>
+                      <span class="material-icons">arrow_drop_down</span>
+                    </button>
+                    <div id="dashboard-folder-filter-dropdown" class="custom-select-dropdown" style="display: none;">
+                      <div class="filter-option" data-folder-id="all">
+                        <input type="checkbox" id="dashboard-filter-all" checked>
+                        <label for="dashboard-filter-all">All Folders</label>
+                      </div>
+                      <div class="filter-divider"></div>
+                      <div id="dashboard-folder-filter-options">
+                        <!-- Folder options will be dynamically populated -->
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </header>
 
             <div class="view-content">
@@ -287,6 +308,61 @@
                   </div>
                   <div class="metric-value" id="stat-pending">0</div>
                   <div class="metric-description">Tasks still in progress</div>
+                </div>
+              </div>
+
+              <!-- Activity Tracker Component -->
+              <div class="activity-tracker-section">
+                <div class="activity-tracker-header">
+                  <h2 class="activity-tracker-title">
+                    <span id="activity-count">0 completions</span> in the last year
+                  </h2>
+                </div>
+
+                <div class="activity-tracker-container">
+                  <!-- Main grid area -->
+                  <div class="activity-grid-wrapper">
+                    <!-- Day labels (left side) -->
+                    <div class="activity-day-labels">
+                      <div class="day-label"></div> <!-- Empty for spacing -->
+                      <div class="day-label">Mon</div>
+                      <div class="day-label"></div> <!-- Empty spacing -->
+                      <div class="day-label">Wed</div>
+                      <div class="day-label"></div> <!-- Empty spacing -->
+                      <div class="day-label">Fri</div>
+                      <div class="day-label"></div> <!-- Empty for spacing -->
+                    </div>
+
+                    <!-- Month labels (top) and grid -->
+                    <div class="activity-grid-content">
+                      <div class="activity-month-labels" id="activity-month-labels">
+                        <!-- Month labels will be dynamically generated -->
+                      </div>
+
+                      <div class="activity-grid" id="activity-grid">
+                        <!-- 52 weeks x 7 days grid will be dynamically generated -->
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Year selector (right side) -->
+                  <div class="activity-year-selector">
+                    <div class="year-option active" data-year="2025">2025</div>
+                    <div class="year-option" data-year="2024">2024</div>
+                    <div class="year-option" data-year="2023">2023</div>
+                    <div class="year-option" data-year="2022">2022</div>
+                  </div>
+                </div>
+
+                <!-- Legend -->
+                <div class="activity-legend">
+                  <span class="legend-label">Less</span>
+                  <div class="legend-box level-0"></div>
+                  <div class="legend-box level-1"></div>
+                  <div class="legend-box level-2"></div>
+                  <div class="legend-box level-3"></div>
+                  <div class="legend-box level-4"></div>
+                  <span class="legend-label">More</span>
                 </div>
               </div>
 

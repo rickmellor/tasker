@@ -468,6 +468,29 @@ body[data-theme="dark"] .folder-git-icon-dark {
   opacity: 0.9;
 }
 
+/* Outline cloud icon for not-synced state */
+.folder-cloud-outline {
+  opacity: 0.5;
+}
+
+/* Sync spinner animation */
+.folder-sync-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-left: 0.5rem;
+  flex-shrink: 0;
+  border: 2px solid var(--text-secondary);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: folder-sync-spin 1s linear infinite;
+}
+
+@keyframes folder-sync-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 /* Embeddings icon in sidebar for folders with embeddings enabled */
 .folder-embeddings-icon {
   font-size: 16px;
@@ -1052,9 +1075,11 @@ body[data-theme="dark"] .folder-error-icon {
   cursor: pointer;
 }
 
-.filter-option span {
+.filter-option span,
+.filter-option label {
   font-size: 0.9rem;
   color: var(--text-primary);
+  cursor: pointer;
 }
 
 .filter-count {
@@ -1677,6 +1702,295 @@ body[data-theme="dark"] .status-completed {
   font-size: 0.8rem;
   color: var(--text-tertiary);
   line-height: 1.4;
+}
+
+/* Dashboard Folder Filter */
+.dashboard-folder-filter-container {
+  display: flex;
+  align-items: center;
+}
+
+.custom-select-wrapper {
+  position: relative;
+}
+
+.custom-select-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 1rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--font-mono);
+}
+
+.custom-select-btn:hover {
+  border-color: var(--accent-primary);
+  background: var(--bg-hover);
+}
+
+.custom-select-btn .material-icons {
+  font-size: 20px;
+  color: var(--text-secondary);
+}
+
+.custom-select-dropdown {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  z-index: 1000;
+}
+
+.filter-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 0.25rem 0;
+}
+
+/* Activity Tracker */
+.activity-tracker-section {
+  margin-top: 3rem;
+  max-width: 1200px;
+}
+
+.activity-tracker-header {
+  margin-bottom: 1rem;
+}
+
+.activity-tracker-title {
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.activity-tracker-title #activity-count {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.activity-tracker-container {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.activity-grid-wrapper {
+  flex: 1;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.activity-day-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 20px; /* Space for month labels */
+}
+
+.day-label {
+  height: 11px;
+  font-size: 0.65rem;
+  color: var(--text-tertiary);
+  text-align: right;
+  padding-right: 0.25rem;
+  line-height: 11px;
+}
+
+.activity-grid-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-month-labels {
+  display: flex;
+  height: 20px;
+  margin-bottom: 4px;
+  position: relative;
+}
+
+.month-label {
+  font-size: 0.65rem;
+  color: var(--text-tertiary);
+  position: absolute;
+  white-space: nowrap;
+}
+
+.activity-grid {
+  display: grid;
+  grid-template-columns: repeat(52, 11px);
+  grid-template-rows: repeat(7, 11px);
+  gap: 3px;
+  grid-auto-flow: column;
+}
+
+.activity-cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.activity-cell:hover {
+  outline: 1px solid var(--text-tertiary);
+  outline-offset: 0;
+}
+
+/* Activity level colors - Light theme (blue gradient) */
+.activity-cell.level-0 {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+}
+
+.activity-cell.level-1 {
+  background: #9dd7ff;
+}
+
+.activity-cell.level-2 {
+  background: #4fa3ff;
+}
+
+.activity-cell.level-3 {
+  background: #1e7bd1;
+}
+
+.activity-cell.level-4 {
+  background: #0d5bb8;
+}
+
+/* Dark theme - green gradient */
+body[data-theme="dark"] .activity-cell.level-0 {
+  background: #161b22;
+  border-color: #21262d;
+}
+
+body[data-theme="dark"] .activity-cell.level-1 {
+  background: #0e4429;
+}
+
+body[data-theme="dark"] .activity-cell.level-2 {
+  background: #006d32;
+}
+
+body[data-theme="dark"] .activity-cell.level-3 {
+  background: #26a641;
+}
+
+body[data-theme="dark"] .activity-cell.level-4 {
+  background: #39d353;
+}
+
+/* Year selector */
+.activity-year-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.year-option {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+  font-weight: 500;
+  font-family: var(--font-mono);
+}
+
+.year-option:hover {
+  border-color: var(--accent-primary);
+  color: var(--text-primary);
+}
+
+.year-option.active {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+/* Legend */
+.activity-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 1rem;
+  justify-content: flex-end;
+}
+
+.legend-label {
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  margin: 0 0.25rem;
+}
+
+.legend-box {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+}
+
+.legend-box.level-0 {
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+}
+
+.legend-box.level-1 {
+  background: #9dd7ff;
+}
+
+.legend-box.level-2 {
+  background: #4fa3ff;
+}
+
+.legend-box.level-3 {
+  background: #1e7bd1;
+}
+
+.legend-box.level-4 {
+  background: #0d5bb8;
+}
+
+body[data-theme="dark"] .legend-box.level-0 {
+  background: #161b22;
+  border-color: #21262d;
+}
+
+body[data-theme="dark"] .legend-box.level-1 {
+  background: #0e4429;
+}
+
+body[data-theme="dark"] .legend-box.level-2 {
+  background: #006d32;
+}
+
+body[data-theme="dark"] .legend-box.level-3 {
+  background: #26a641;
+}
+
+body[data-theme="dark"] .legend-box.level-4 {
+  background: #39d353;
 }
 
 /* Strategic Overview Section */
