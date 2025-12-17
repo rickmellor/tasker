@@ -102,6 +102,14 @@ class TaskStorage {
   }
 
   /**
+   * Get EMMs path (constructs path without creating directory)
+   */
+  getEmmsPath() {
+    const userHome = app.getPath('home');
+    return path.join(userHome, '.tasker-data', 'emms');
+  }
+
+  /**
    * Get Goals path (constructs path without creating directory)
    */
   getGoalsPath() {
@@ -196,6 +204,25 @@ class TaskStorage {
     let confidenceLevel = null;
     let goalYear = new Date().getFullYear(); // Default to current year
 
+    // OKR-specific fields
+    let quarter = '';
+    let type = '';
+    let objectiveTitle = '';
+    let objectiveDescription = '';
+    let systemArchitect = '';
+    let productOkrLink = '';
+    let objectiveStatus = 'green';
+    let keyResults = [];
+
+    // EMM-specific fields
+    let emmTitle = '';
+    let emmDescription = '';
+    let emmPriority = 'P1';
+    let emmStatus = 'green';
+    let emmInput = '';
+    let emmOutput = '';
+    let emmNotes = '';
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
 
@@ -250,6 +277,41 @@ class TaskStorage {
         } else if (line.startsWith('goalYear:')) {
           const value = line.substring(9).trim();
           goalYear = value ? parseInt(value) : new Date().getFullYear();
+        } else if (line.startsWith('quarter:')) {
+          quarter = line.substring(8).trim();
+        } else if (line.startsWith('type:')) {
+          type = line.substring(5).trim();
+        } else if (line.startsWith('objectiveTitle:')) {
+          objectiveTitle = line.substring(15).trim();
+        } else if (line.startsWith('objectiveDescription:')) {
+          objectiveDescription = line.substring(21).trim();
+        } else if (line.startsWith('systemArchitect:')) {
+          systemArchitect = line.substring(16).trim();
+        } else if (line.startsWith('productOkrLink:')) {
+          productOkrLink = line.substring(15).trim();
+        } else if (line.startsWith('objectiveStatus:')) {
+          objectiveStatus = line.substring(16).trim();
+        } else if (line.startsWith('keyResults:')) {
+          try {
+            const jsonStr = line.substring(11).trim();
+            keyResults = jsonStr ? JSON.parse(jsonStr) : [];
+          } catch (e) {
+            keyResults = [];
+          }
+        } else if (line.startsWith('emmTitle:')) {
+          emmTitle = line.substring(9).trim();
+        } else if (line.startsWith('emmDescription:')) {
+          emmDescription = line.substring(15).trim();
+        } else if (line.startsWith('emmPriority:')) {
+          emmPriority = line.substring(12).trim();
+        } else if (line.startsWith('emmStatus:')) {
+          emmStatus = line.substring(10).trim();
+        } else if (line.startsWith('emmInput:')) {
+          emmInput = line.substring(9).trim();
+        } else if (line.startsWith('emmOutput:')) {
+          emmOutput = line.substring(10).trim();
+        } else if (line.startsWith('emmNotes:')) {
+          emmNotes = line.substring(9).trim();
         }
       } else {
         body += line + '\n';
@@ -318,7 +380,24 @@ class TaskStorage {
       linkedTasks: linkedTasks || [],
       goalStatus: goalStatus || 'On Track',
       confidenceLevel: confidenceLevel,
-      goalYear: goalYear || new Date().getFullYear()
+      goalYear: goalYear || new Date().getFullYear(),
+      // OKR-specific fields (will be empty for regular tasks)
+      quarter: quarter || '',
+      type: type || '',
+      objectiveTitle: objectiveTitle || '',
+      objectiveDescription: objectiveDescription || '',
+      systemArchitect: systemArchitect || '',
+      productOkrLink: productOkrLink || '',
+      objectiveStatus: objectiveStatus || 'green',
+      keyResults: keyResults || [],
+      // EMM-specific fields (will be empty for regular tasks)
+      emmTitle: emmTitle || '',
+      emmDescription: emmDescription || '',
+      emmPriority: emmPriority || 'P1',
+      emmStatus: emmStatus || 'green',
+      emmInput: emmInput || '',
+      emmOutput: emmOutput || '',
+      emmNotes: emmNotes || ''
     };
   }
 
@@ -361,6 +440,55 @@ created: ${createdDate}`;
     }
     if (goalFields.goalYear !== undefined) {
       frontmatter += `\ngoalYear: ${goalFields.goalYear || new Date().getFullYear()}`;
+    }
+
+    // Add OKR-specific fields if provided
+    if (goalFields.quarter !== undefined) {
+      frontmatter += `\nquarter: ${goalFields.quarter || ''}`;
+    }
+    if (goalFields.type !== undefined) {
+      frontmatter += `\ntype: ${goalFields.type || ''}`;
+    }
+    if (goalFields.objectiveTitle !== undefined) {
+      frontmatter += `\nobjectiveTitle: ${goalFields.objectiveTitle || ''}`;
+    }
+    if (goalFields.objectiveDescription !== undefined) {
+      frontmatter += `\nobjectiveDescription: ${goalFields.objectiveDescription || ''}`;
+    }
+    if (goalFields.systemArchitect !== undefined) {
+      frontmatter += `\nsystemArchitect: ${goalFields.systemArchitect || ''}`;
+    }
+    if (goalFields.productOkrLink !== undefined) {
+      frontmatter += `\nproductOkrLink: ${goalFields.productOkrLink || ''}`;
+    }
+    if (goalFields.objectiveStatus !== undefined) {
+      frontmatter += `\nobjectiveStatus: ${goalFields.objectiveStatus || 'green'}`;
+    }
+    if (goalFields.keyResults !== undefined) {
+      frontmatter += `\nkeyResults: ${goalFields.keyResults || '[]'}`;
+    }
+
+    // Add EMM-specific fields if provided
+    if (goalFields.emmTitle !== undefined) {
+      frontmatter += `\nemmTitle: ${goalFields.emmTitle || ''}`;
+    }
+    if (goalFields.emmDescription !== undefined) {
+      frontmatter += `\nemmDescription: ${goalFields.emmDescription || ''}`;
+    }
+    if (goalFields.emmPriority !== undefined) {
+      frontmatter += `\nemmPriority: ${goalFields.emmPriority || 'P1'}`;
+    }
+    if (goalFields.emmStatus !== undefined) {
+      frontmatter += `\nemmStatus: ${goalFields.emmStatus || 'green'}`;
+    }
+    if (goalFields.emmInput !== undefined) {
+      frontmatter += `\nemmInput: ${goalFields.emmInput || ''}`;
+    }
+    if (goalFields.emmOutput !== undefined) {
+      frontmatter += `\nemmOutput: ${goalFields.emmOutput || ''}`;
+    }
+    if (goalFields.emmNotes !== undefined) {
+      frontmatter += `\nemmNotes: ${goalFields.emmNotes || ''}`;
     }
 
     frontmatter += '\n---';
@@ -449,6 +577,25 @@ ${body}
     const confidenceLevel = updates.confidenceLevel !== undefined ? updates.confidenceLevel : task.confidenceLevel;
     const goalYear = updates.goalYear !== undefined ? updates.goalYear : (task.goalYear || new Date().getFullYear());
 
+    // OKR-specific fields
+    const quarter = updates.quarter !== undefined ? updates.quarter : task.quarter;
+    const type = updates.type !== undefined ? updates.type : task.type;
+    const objectiveTitle = updates.objectiveTitle !== undefined ? updates.objectiveTitle : task.objectiveTitle;
+    const objectiveDescription = updates.objectiveDescription !== undefined ? updates.objectiveDescription : task.objectiveDescription;
+    const systemArchitect = updates.systemArchitect !== undefined ? updates.systemArchitect : task.systemArchitect;
+    const productOkrLink = updates.productOkrLink !== undefined ? updates.productOkrLink : task.productOkrLink;
+    const objectiveStatus = updates.objectiveStatus !== undefined ? updates.objectiveStatus : task.objectiveStatus;
+    const keyResults = updates.keyResults !== undefined ? updates.keyResults : task.keyResults;
+
+    // EMM-specific fields
+    const emmTitle = updates.emmTitle !== undefined ? updates.emmTitle : task.emmTitle;
+    const emmDescription = updates.emmDescription !== undefined ? updates.emmDescription : task.emmDescription;
+    const emmPriority = updates.emmPriority !== undefined ? updates.emmPriority : task.emmPriority;
+    const emmStatus = updates.emmStatus !== undefined ? updates.emmStatus : task.emmStatus;
+    const emmInput = updates.emmInput !== undefined ? updates.emmInput : task.emmInput;
+    const emmOutput = updates.emmOutput !== undefined ? updates.emmOutput : task.emmOutput;
+    const emmNotes = updates.emmNotes !== undefined ? updates.emmNotes : task.emmNotes;
+
     // Sync status and completed flag - prioritize status field over completed checkbox
     if (updates.status !== undefined) {
       // If status is being updated, sync completed flag
@@ -476,13 +623,59 @@ ${body}
       linkedTasks,
       goalStatus,
       confidenceLevel,
-      goalYear
+      goalYear,
+      quarter,
+      type,
+      objectiveTitle,
+      objectiveDescription,
+      systemArchitect,
+      productOkrLink,
+      objectiveStatus,
+      keyResults,
+      emmTitle,
+      emmDescription,
+      emmPriority,
+      emmStatus,
+      emmInput,
+      emmOutput,
+      emmNotes
     };
 
     const content = this.createTaskContent(title, completed, body, priority, dueDate, status, task.created, completedDate, goalFields);
     await fs.writeFile(taskPath, content, 'utf-8');
 
-    return { ...task, title, completed, body, priority, dueDate, completedDate, status, whyItMatters, successCriteria, keyMilestones, linkedTasks, goalStatus, confidenceLevel, goalYear };
+    return {
+      ...task,
+      title,
+      completed,
+      body,
+      priority,
+      dueDate,
+      completedDate,
+      status,
+      whyItMatters,
+      successCriteria,
+      keyMilestones,
+      linkedTasks,
+      goalStatus,
+      confidenceLevel,
+      goalYear,
+      quarter,
+      type,
+      objectiveTitle,
+      objectiveDescription,
+      systemArchitect,
+      productOkrLink,
+      objectiveStatus,
+      keyResults,
+      emmTitle,
+      emmDescription,
+      emmPriority,
+      emmStatus,
+      emmInput,
+      emmOutput,
+      emmNotes
+    };
   }
 
   /**

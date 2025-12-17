@@ -733,6 +733,7 @@ ipcMain.handle('goals:get-path', () => {
 ipcMain.handle('okrs:load', async () => {
   try {
     const okrsPath = taskStorage.getOkrsPath();
+    await taskStorage.ensureDirectory(okrsPath);
     const okrs = await taskStorage.loadTasks(okrsPath, true);
     return { success: true, okrs };
   } catch (error) {
@@ -743,6 +744,7 @@ ipcMain.handle('okrs:load', async () => {
 ipcMain.handle('okrs:create', async (_event, text, body) => {
   try {
     const okrsPath = taskStorage.getOkrsPath();
+    await taskStorage.ensureDirectory(okrsPath);
     const okr = await taskStorage.createTask(okrsPath, text, body);
     return { success: true, okr };
   } catch (error) {
@@ -772,6 +774,57 @@ ipcMain.handle('okrs:reorder', async (_event, orderedFileNames) => {
   try {
     const okrsPath = taskStorage.getOkrsPath();
     await taskStorage.reorderTasks(okrsPath, orderedFileNames);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// EMMs CRUD operations
+ipcMain.handle('emms:load', async () => {
+  try {
+    const emmsPath = taskStorage.getEmmsPath();
+    await taskStorage.ensureDirectory(emmsPath);
+    const emms = await taskStorage.loadTasks(emmsPath, true);
+    return { success: true, emms };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('emms:create', async (_event, text, body) => {
+  try {
+    const emmsPath = taskStorage.getEmmsPath();
+    await taskStorage.ensureDirectory(emmsPath);
+    const emm = await taskStorage.createTask(emmsPath, text, body);
+    return { success: true, emm };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('emms:update', async (_event, emmPath, updates) => {
+  try {
+    const emm = await taskStorage.updateTask(emmPath, updates);
+    return { success: true, emm };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('emms:delete', async (_event, emmPath) => {
+  try {
+    await taskStorage.deleteTask(emmPath);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('emms:reorder', async (_event, orderedFileNames) => {
+  try {
+    const emmsPath = taskStorage.getEmmsPath();
+    await taskStorage.reorderTasks(emmsPath, orderedFileNames);
     return { success: true };
   } catch (error) {
     return { success: false, error: error.message };

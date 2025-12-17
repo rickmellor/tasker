@@ -76,6 +76,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     reorder: (orderedFileNames) => ipcRenderer.invoke('okrs:reorder', orderedFileNames)
   },
 
+  // EMMs Storage
+  emms: {
+    load: () => ipcRenderer.invoke('emms:load'),
+    create: (text, body) => ipcRenderer.invoke('emms:create', text, body),
+    update: (emmPath, updates) => ipcRenderer.invoke('emms:update', emmPath, updates),
+    delete: (emmPath) => ipcRenderer.invoke('emms:delete', emmPath),
+    reorder: (orderedFileNames) => ipcRenderer.invoke('emms:reorder', orderedFileNames)
+  },
+
   // Goals Storage
   goals: {
     initialize: () => ipcRenderer.invoke('goals:initialize'),

@@ -99,6 +99,12 @@ const state = {
   selectedTaskPaths: [], // Track selected tasks for multi-select and keyboard navigation
   lastSelectedTaskPath: null, // Track last selected task for shift-click range selection
   enableOkrs: false, // Enable OKR tracking
+  okrYears: [], // Array of years for OKRs (e.g., [2024, 2025])
+  okrs: {}, // OKRs organized by year-quarter: { '2025-q1': [okr1, okr2], '2025-q2': [...] }
+  emms: {}, // EMMs organized by year-quarter: { '2025-q1': [emm1, emm2], '2025-q2': [...] }
+  currentOkrEmmType: null, // Track which type we're adding ('okr' or 'emm')
+  currentOkrEmmQuarter: null, // Track which quarter we're adding to (e.g., '2025-q1')
+  currentOkrEmm: null, // Currently viewing OKR/EMM
   enableGoals: false // Enable Annual Goals tracking
 };
 
@@ -124,6 +130,7 @@ const elements = {
   views: {
     tasks: document.getElementById('tasks-view'),
     'goals-view': document.getElementById('goals-view'),
+    'okr-emm-view': document.getElementById('okr-emm-view'),
     profile: document.getElementById('profile-view'),
     help: document.getElementById('help-view'),
     settings: document.getElementById('settings-view')
@@ -153,8 +160,23 @@ const elements = {
 
   // Folder management
   sidebarFolders: document.getElementById('sidebar-folders'),
+  addFolderBtnSidebar: document.getElementById('add-folder-btn-sidebar'),
   addFolderSettingsBtn: document.getElementById('add-folder-settings-btn'),
   folderList: document.getElementById('folder-list'),
+
+  // OKR Year management
+  addOkrYearBtnSidebar: document.getElementById('add-okr-year-btn-sidebar'),
+  addOkrYearModal: document.getElementById('add-okr-year-modal'),
+  okrYearInput: document.getElementById('okr-year-input'),
+  addOkrYearCancelBtn: document.getElementById('add-okr-year-cancel-btn'),
+  addOkrYearSaveBtn: document.getElementById('add-okr-year-save-btn'),
+
+  // OKR/EMM management
+  addOkrEmmModal: document.getElementById('add-okr-emm-modal'),
+  okrEmmModalTitle: document.getElementById('okr-emm-modal-title'),
+  okrEmmTitleInput: document.getElementById('okr-emm-title-input'),
+  addOkrEmmCancelBtn: document.getElementById('add-okr-emm-cancel-btn'),
+  addOkrEmmSaveBtn: document.getElementById('add-okr-emm-save-btn'),
 
   // Prompt management
   addPromptBtn: document.getElementById('add-prompt-btn'),
@@ -348,7 +370,11 @@ const elements = {
 
   // Context Menu
   taskContextMenu: document.getElementById('task-context-menu'),
-  textContextMenu: document.getElementById('text-context-menu')
+  textContextMenu: document.getElementById('text-context-menu'),
+  folderContextMenu: document.getElementById('folder-context-menu'),
+  okrYearContextMenu: document.getElementById('okr-year-context-menu'),
+  goalYearContextMenu: document.getElementById('goal-year-context-menu'),
+  okrEmmItemContextMenu: document.getElementById('okr-emm-item-context-menu')
 };
 
 // ========================================
@@ -360,6 +386,12 @@ async function initializeApp() {
 
   // Initialize task storage
   await initializeTaskStorage();
+
+  // Load OKRs and EMMs
+  await loadOkrsAndEmms();
+
+  // Render OKRs sidebar after loading
+  renderOkrsSidebar();
 
   // Navigate to tasks view
   navigateToView('tasks');
@@ -525,6 +557,7 @@ async function loadFoldersFromStorage() {
 
     // Load feature toggles (default to false)
     state.enableOkrs = result.config.enableOkrs || false;
+    state.okrYears = result.config.okrYears || [];
     state.enableGoals = result.config.enableGoals || false;
 
     // Initialize goals sidebar if goals are enabled
@@ -609,6 +642,7 @@ async function saveAllSettings() {
       taskViewMode: state.taskViewMode,
       agentHeight: state.agentHeight,
       enableOkrs: state.enableOkrs,
+      okrYears: state.okrYears,
       enableGoals: state.enableGoals
     });
   } finally {
@@ -878,6 +912,58 @@ function closeAddFolderModal() {
   elements.folderPathInput.value = '';
   elements.folderNameInput.value = '';
   elements.enableVersionControlCheckbox.checked = false;
+}
+
+// ========================================
+// OKR Year Management
+// ========================================
+function openAddOkrYearModal() {
+  // Determine next year to suggest
+  const currentYear = new Date().getFullYear();
+  let suggestedYear = currentYear;
+
+  if (state.okrYears.length > 0) {
+    // Find the latest year and add 1
+    const latestYear = Math.max(...state.okrYears);
+    suggestedYear = latestYear + 1;
+  }
+
+  elements.okrYearInput.value = suggestedYear;
+  elements.addOkrYearModal.classList.add('active');
+  elements.okrYearInput.focus();
+  elements.okrYearInput.select();
+}
+
+function closeAddOkrYearModal() {
+  elements.addOkrYearModal.classList.remove('active');
+  elements.okrYearInput.value = '';
+}
+
+async function saveAddOkrYear() {
+  const year = parseInt(elements.okrYearInput.value);
+
+  if (!year || year < 2000 || year > 2100) {
+    alert('Please enter a valid year between 2000 and 2100.');
+    return;
+  }
+
+  // Check if year already exists
+  if (state.okrYears.includes(year)) {
+    alert(`Year ${year} already exists.`);
+    return;
+  }
+
+  // Add year to state
+  state.okrYears.push(year);
+  state.okrYears.sort((a, b) => a - b); // Keep sorted
+
+  // Save to config
+  await saveAllSettings();
+
+  // Render updated OKRs sidebar
+  renderOkrsSidebar();
+
+  closeAddOkrYearModal();
 }
 
 async function browseFolderForModal() {
@@ -1260,10 +1346,273 @@ function renderSidebarFolders() {
         }
       }
     });
+
+    // Add right-click context menu
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const folderId = btn.dataset.folderId;
+      showFolderContextMenu(e.clientX, e.clientY, folderId);
+    });
   });
 
   // Setup drag and drop for folders
   setupFolderDragAndDrop();
+}
+
+// ========================================
+// Folder Context Menu
+// ========================================
+let contextMenuFolderId = null;
+let contextMenuOkrYear = null;
+let contextMenuGoalYear = null;
+
+function showFolderContextMenu(x, y, folderId) {
+  contextMenuFolderId = folderId;
+
+  // Position and show context menu
+  elements.folderContextMenu.style.left = `${x}px`;
+  elements.folderContextMenu.style.top = `${y}px`;
+  elements.folderContextMenu.classList.add('active');
+}
+
+async function deleteFolderFromContextMenu() {
+  if (!contextMenuFolderId) return;
+
+  const folder = state.taskFolders.find(f => f.id === contextMenuFolderId);
+  if (!folder) return;
+
+  const confirmed = confirm(`Are you sure you want to delete the folder "${folder.name}"?\n\nThis will remove it from the sidebar, but files will remain on disk.`);
+
+  if (!confirmed) {
+    return;
+  }
+
+  await removeFolder(contextMenuFolderId, false);
+  contextMenuFolderId = null;
+}
+
+// ========================================
+// OKR Year Context Menu
+// ========================================
+function showOkrYearContextMenu(x, y, year) {
+  contextMenuOkrYear = year;
+
+  // Position and show context menu
+  elements.okrYearContextMenu.style.left = `${x}px`;
+  elements.okrYearContextMenu.style.top = `${y}px`;
+  elements.okrYearContextMenu.classList.add('active');
+}
+
+async function deleteOkrYearFromContextMenu() {
+  if (contextMenuOkrYear === null) return;
+
+  const confirmed = confirm(`Are you sure you want to delete the OKR/EMM year ${contextMenuOkrYear}?\n\nThis will remove it from the sidebar.`);
+
+  if (!confirmed) {
+    contextMenuOkrYear = null;
+    return;
+  }
+
+  // Remove year from state
+  state.okrYears = state.okrYears.filter(y => y !== contextMenuOkrYear);
+
+  // Save to config
+  await saveAllSettings();
+
+  // Re-render sidebar
+  renderOkrsSidebar();
+
+  contextMenuOkrYear = null;
+}
+
+// ========================================
+// Goal Year Context Menu
+// ========================================
+function showGoalYearContextMenu(x, y, year) {
+  contextMenuGoalYear = year;
+
+  // Position and show context menu
+  elements.goalYearContextMenu.style.left = `${x}px`;
+  elements.goalYearContextMenu.style.top = `${y}px`;
+  elements.goalYearContextMenu.classList.add('active');
+}
+
+async function deleteGoalYearFromContextMenu() {
+  if (contextMenuGoalYear === null) return;
+
+  // Check if this year has any goals
+  const goalsForYear = (state.goalsByYear && state.goalsByYear[contextMenuGoalYear]) ? state.goalsByYear[contextMenuGoalYear] : [];
+
+  if (goalsForYear.length > 0) {
+    const confirmed = confirm(`Are you sure you want to delete year ${contextMenuGoalYear}?\n\nThis year contains ${goalsForYear.length} goal(s). All goals for this year will be permanently deleted.`);
+
+    if (!confirmed) {
+      contextMenuGoalYear = null;
+      return;
+    }
+
+    // Delete each goal file via IPC
+    for (const goal of goalsForYear) {
+      if (goal.filePath) {
+        try {
+          await window.electronAPI.goals.delete(goal.filePath);
+        } catch (error) {
+          console.error(`Failed to delete goal ${goal.title}:`, error);
+        }
+      }
+    }
+  } else {
+    const confirmed = confirm(`Are you sure you want to delete year ${contextMenuGoalYear}?`);
+
+    if (!confirmed) {
+      contextMenuGoalYear = null;
+      return;
+    }
+  }
+
+  // Delete all goals for this year from state
+  if (state.goalsByYear && state.goalsByYear[contextMenuGoalYear]) {
+    delete state.goalsByYear[contextMenuGoalYear];
+  }
+
+  // Update goals array
+  state.goals = state.goals.filter(g => g.goalYear !== contextMenuGoalYear);
+
+  // If we're currently viewing this year, switch to a different year
+  if (state.selectedGoalYear === contextMenuGoalYear) {
+    const remainingYears = Object.keys(state.goalsByYear || {}).map(y => parseInt(y)).sort((a, b) => b - a);
+    if (remainingYears.length > 0) {
+      state.selectedGoalYear = remainingYears[0];
+    } else {
+      // No more years with goals, show current year as empty
+      state.selectedGoalYear = new Date().getFullYear();
+    }
+  }
+
+  // Re-render sidebar and goals view (without reloading from disk)
+  renderGoalsSidebar();
+  renderGoals();
+
+  contextMenuGoalYear = null;
+}
+
+// ========================================
+// OKR/EMM Item Context Menu
+// ========================================
+let contextMenuOkrEmmItem = null;
+
+function showOkrEmmItemContextMenu(x, y, type, id) {
+  contextMenuOkrEmmItem = { type, id };
+
+  // Position and show context menu
+  elements.okrEmmItemContextMenu.style.left = `${x}px`;
+  elements.okrEmmItemContextMenu.style.top = `${y}px`;
+  elements.okrEmmItemContextMenu.classList.add('active');
+}
+
+async function deleteOkrEmmItemFromContextMenu() {
+  if (!contextMenuOkrEmmItem) return;
+
+  const { type, id } = contextMenuOkrEmmItem;
+  const typeLabel = type === 'okr' ? 'OKR' : 'EMM';
+
+  // Convert ID to number for comparison
+  const numericId = typeof id === 'string' ? parseInt(id) : id;
+
+  // Find the item
+  let item = null;
+  let quarter = null;
+  const collection = type === 'okr' ? state.okrs : state.emms;
+
+  for (const q in collection) {
+    const found = collection[q].find(i => i.id === numericId);
+    if (found) {
+      item = found;
+      quarter = q;
+      break;
+    }
+  }
+
+  if (!item) {
+    console.error(`[OKR/EMM] Item not found: ${type} ${id}`);
+    contextMenuOkrEmmItem = null;
+    return;
+  }
+
+  const confirmed = confirm(`Are you sure you want to delete this ${typeLabel}?\n\n"${item.title}"\n\nThis action cannot be undone.`);
+
+  if (!confirmed) {
+    contextMenuOkrEmmItem = null;
+    return;
+  }
+
+  // Delete the file via IPC
+  try {
+    const result = type === 'okr'
+      ? await window.electronAPI.okrs.delete(item.filePath)
+      : await window.electronAPI.emms.delete(item.filePath);
+
+    if (!result.success) {
+      alert(`Failed to delete ${typeLabel}: ${result.error}`);
+      contextMenuOkrEmmItem = null;
+      return;
+    }
+
+    // Remove from state
+    if (collection[quarter]) {
+      collection[quarter] = collection[quarter].filter(i => i.id !== numericId);
+
+      // Clean up empty quarter arrays
+      if (collection[quarter].length === 0) {
+        delete collection[quarter];
+      }
+    }
+
+    // Re-render sidebar with preserved expansion state
+    const expandedYears = [];
+    const expandedQuarters = [];
+    document.querySelectorAll('.okr-year-header.expanded').forEach(header => {
+      expandedYears.push(header.dataset.year);
+    });
+    document.querySelectorAll('.okr-quarter-header.expanded').forEach(header => {
+      expandedQuarters.push(header.dataset.quarter);
+    });
+
+    renderOkrsSidebar();
+
+    // Restore expanded state
+    expandedYears.forEach(year => {
+      const header = document.querySelector(`.okr-year-header[data-year="${year}"]`);
+      const content = document.querySelector(`.okr-year-content[data-year-content="${year}"]`);
+      if (header && content) {
+        header.classList.add('expanded');
+        content.classList.add('expanded');
+      }
+    });
+    expandedQuarters.forEach(q => {
+      const header = document.querySelector(`.okr-quarter-header[data-quarter="${q}"]`);
+      const content = document.querySelector(`.okr-quarter-content[data-quarter-content="${q}"]`);
+      if (header && content) {
+        header.classList.add('expanded');
+        content.classList.add('expanded');
+      }
+    });
+
+    initializeOkrsHandlers();
+
+    // If we're currently viewing this item, go back to tasks
+    if (state.currentOkrEmm && state.currentOkrEmm.id === id) {
+      navigateToView('tasks-view');
+      state.currentOkrEmm = null;
+    }
+
+  } catch (error) {
+    console.error(`Failed to delete ${typeLabel}:`, error);
+    alert(`Failed to delete ${typeLabel}: ${error.message}`);
+  }
+
+  contextMenuOkrEmmItem = null;
 }
 
 function renderFolderList() {
@@ -2241,8 +2590,124 @@ async function initializeGoalsSidebar() {
   }
 }
 
+function renderOkrEmmSection(year, quarter, type) {
+  const key = `${year}-${quarter}`;
+  const items = type === 'okr' ? (state.okrs[key] || []) : (state.emms[key] || []);
+  const typeLabel = type === 'okr' ? 'OKRs' : 'EMMs';
+  const typeClass = type === 'okr' ? 'okr-section' : 'emm-section';
+
+  let html = `
+    <div class="${typeClass}" data-type="${type}" data-quarter="${key}">
+      <div class="okr-emm-header">
+        <span class="okr-emm-title">${typeLabel}</span>
+        <button class="sidebar-action-btn add-okr-emm-btn" data-type="${type}" data-quarter="${key}" title="Add ${typeLabel}">
+          <span class="material-icons">add</span>
+        </button>
+      </div>
+  `;
+
+  if (items.length === 0) {
+    html += `<div class="okr-emm-empty" style="opacity: 0.5; padding-left: 4rem; font-size: 0.8rem;">No ${typeLabel} yet</div>`;
+  } else {
+    items.forEach(item => {
+      html += `
+        <div class="sidebar-item okr-emm-item" data-type="${type}" data-id="${item.id}" style="padding-left: 4rem;">
+          <span class="sidebar-item-text">${escapeHtml(item.title || 'Untitled')}</span>
+        </div>
+      `;
+    });
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function renderOkrsSidebar() {
+  const sidebar = document.getElementById('sidebar-okrs');
+  if (!sidebar) return;
+
+  // Clear sidebar
+  sidebar.innerHTML = '';
+
+  // If no years, show a message
+  if (state.okrYears.length === 0) {
+    sidebar.innerHTML = '<div class="sidebar-item" style="opacity: 0.5; padding-left: 2rem;">No years added yet. Click + to add a year.</div>';
+    return;
+  }
+
+  // Sort years descending (most recent first)
+  const sortedYears = [...state.okrYears].sort((a, b) => b - a);
+
+  // Render each year with quarters
+  sortedYears.forEach(year => {
+    const yearGroup = document.createElement('div');
+    yearGroup.className = 'okr-year-group';
+
+    yearGroup.innerHTML = `
+      <div class="okr-year-header" data-year="${year}">
+        <span class="material-icons okr-year-expand-icon">chevron_right</span>
+        <span>${year}</span>
+      </div>
+      <div class="okr-year-content" data-year-content="${year}">
+        <div class="okr-quarter-group">
+          <div class="okr-quarter-header" data-quarter="${year}-q1">
+            <span class="material-icons okr-expand-icon">chevron_right</span>
+            <span>Q1</span>
+          </div>
+          <div class="okr-quarter-content" data-quarter-content="${year}-q1">
+            ${renderOkrEmmSection(year, 'q1', 'okr')}
+            ${renderOkrEmmSection(year, 'q1', 'emm')}
+          </div>
+        </div>
+        <div class="okr-quarter-group">
+          <div class="okr-quarter-header" data-quarter="${year}-q2">
+            <span class="material-icons okr-expand-icon">chevron_right</span>
+            <span>Q2</span>
+          </div>
+          <div class="okr-quarter-content" data-quarter-content="${year}-q2">
+            ${renderOkrEmmSection(year, 'q2', 'okr')}
+            ${renderOkrEmmSection(year, 'q2', 'emm')}
+          </div>
+        </div>
+        <div class="okr-quarter-group">
+          <div class="okr-quarter-header" data-quarter="${year}-q3">
+            <span class="material-icons okr-expand-icon">chevron_right</span>
+            <span>Q3</span>
+          </div>
+          <div class="okr-quarter-content" data-quarter-content="${year}-q3">
+            ${renderOkrEmmSection(year, 'q3', 'okr')}
+            ${renderOkrEmmSection(year, 'q3', 'emm')}
+          </div>
+        </div>
+        <div class="okr-quarter-group">
+          <div class="okr-quarter-header" data-quarter="${year}-q4">
+            <span class="material-icons okr-expand-icon">chevron_right</span>
+            <span>Q4</span>
+          </div>
+          <div class="okr-quarter-content" data-quarter-content="${year}-q4">
+            ${renderOkrEmmSection(year, 'q4', 'okr')}
+            ${renderOkrEmmSection(year, 'q4', 'emm')}
+          </div>
+        </div>
+      </div>
+    `;
+
+    sidebar.appendChild(yearGroup);
+  });
+
+  // Re-initialize event handlers
+  initializeOkrsHandlers();
+}
+
 function initializeOkrsSidebar() {
   console.log('[OKRs] Initializing OKRs sidebar...');
+
+  // Render the sidebar first
+  renderOkrsSidebar();
+}
+
+function initializeOkrsHandlers() {
+  console.log('[OKRs] Initializing OKRs handlers...');
 
   // Set up expand/collapse handlers for year headers
   const yearHeaders = document.querySelectorAll('.okr-year-header');
@@ -2265,6 +2730,14 @@ function initializeOkrsSidebar() {
         newHeader.classList.toggle('expanded');
         content.classList.toggle('expanded');
       }
+    });
+
+    // Add right-click context menu
+    newHeader.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const year = parseInt(newHeader.dataset.year);
+      showOkrYearContextMenu(e.clientX, e.clientY, year);
     });
   });
 
@@ -2291,6 +2764,760 @@ function initializeOkrsSidebar() {
       }
     });
   });
+
+  // Set up handlers for '+' buttons to add OKRs/EMMs
+  const addButtons = document.querySelectorAll('.add-okr-emm-btn');
+  console.log('[OKRs] Found', addButtons.length, 'add buttons');
+
+  addButtons.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const type = btn.dataset.type;
+      const quarter = btn.dataset.quarter;
+      openAddOkrEmmModal(type, quarter);
+    });
+  });
+
+  // Set up handlers for clicking OKR/EMM items
+  const items = document.querySelectorAll('.okr-emm-item');
+  console.log('[OKRs] Found', items.length, 'OKR/EMM items');
+
+  items.forEach(item => {
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const type = item.dataset.type;
+      const id = item.dataset.id;
+      openOkrEmmView(type, id);
+    });
+
+    // Right-click context menu
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const type = item.dataset.type;
+      const id = item.dataset.id;
+      showOkrEmmItemContextMenu(e.clientX, e.clientY, type, id);
+    });
+  });
+}
+
+// ========================================
+// OKR/EMM Management
+// ========================================
+function openAddOkrEmmModal(type, quarter) {
+  console.log(`[OKR/EMM] Opening add modal for ${type} in ${quarter}`);
+
+  // Set state for which type and quarter we're adding to
+  state.currentOkrEmmType = type;
+  state.currentOkrEmmQuarter = quarter;
+
+  // Update modal title and labels based on type
+  const typeLabel = type === 'okr' ? 'OKR' : 'EMM';
+  elements.okrEmmModalTitle.textContent = `Add ${typeLabel}`;
+  elements.okrEmmTitleInput.value = '';
+
+  // Show modal
+  elements.addOkrEmmModal.classList.add('active');
+  elements.okrEmmTitleInput.focus();
+}
+
+function closeAddOkrEmmModal() {
+  elements.addOkrEmmModal.classList.remove('active');
+  state.currentOkrEmmType = null;
+  state.currentOkrEmmQuarter = null;
+}
+
+async function loadOkrsAndEmms() {
+  try {
+    // Load OKRs
+    const okrsResult = await window.electronAPI.okrs.load();
+    if (okrsResult.success) {
+      // Organize by quarter (filter out deleted items)
+      state.okrs = {};
+      okrsResult.okrs
+        .filter(okr => !okr.deleted) // Exclude deleted items
+        .forEach(okr => {
+          const quarter = okr.quarter || '2025-q1'; // Default fallback
+
+          // Parse keyResults if it's a string
+          if (typeof okr.keyResults === 'string') {
+            try {
+              okr.keyResults = JSON.parse(okr.keyResults);
+            } catch (e) {
+              okr.keyResults = [];
+            }
+          }
+          if (!Array.isArray(okr.keyResults)) {
+            okr.keyResults = [];
+          }
+
+          if (!state.okrs[quarter]) {
+            state.okrs[quarter] = [];
+          }
+          state.okrs[quarter].push(okr);
+        });
+    }
+
+    // Load EMMs
+    const emmsResult = await window.electronAPI.emms.load();
+    if (emmsResult.success) {
+      // Organize by quarter (filter out deleted items)
+      state.emms = {};
+      emmsResult.emms
+        .filter(emm => !emm.deleted) // Exclude deleted items
+        .forEach(emm => {
+          const quarter = emm.quarter || '2025-q1'; // Default fallback
+          if (!state.emms[quarter]) {
+            state.emms[quarter] = [];
+          }
+          state.emms[quarter].push(emm);
+        });
+    }
+
+    console.log('[OKR/EMM] Loaded', Object.keys(state.okrs).length, 'OKR quarters and', Object.keys(state.emms).length, 'EMM quarters');
+  } catch (error) {
+    console.error('[OKR/EMM] Error loading:', error);
+  }
+}
+
+async function saveAddOkrEmm() {
+  const title = elements.okrEmmTitleInput.value.trim();
+
+  if (!title) {
+    alert('Please enter a title.');
+    return;
+  }
+
+  const type = state.currentOkrEmmType;
+  const quarter = state.currentOkrEmmQuarter;
+
+  // Create via IPC - this will save to a markdown file
+  const result = type === 'okr'
+    ? await window.electronAPI.okrs.create(title, `${type.toUpperCase()} for ${quarter}`)
+    : await window.electronAPI.emms.create(title, `${type.toUpperCase()} for ${quarter}`);
+
+  if (!result.success) {
+    alert(`Failed to create ${type.toUpperCase()}: ${result.error}`);
+    return;
+  }
+
+  // Add quarter metadata to the created item
+  const newItem = result[type] || result.okr || result.emm;
+  newItem.quarter = quarter;
+  newItem.type = type;
+
+  // Initialize OKR-specific fields if this is an OKR
+  if (type === 'okr') {
+    newItem.objectiveTitle = title;
+    newItem.objectiveDescription = '';
+    newItem.systemArchitect = '';
+    newItem.productOkrLink = '';
+    newItem.objectiveStatus = 'green';
+    newItem.keyResults = [];
+
+    // Update it with all OKR fields
+    const updateResult = await window.electronAPI.okrs.update(newItem.filePath, {
+      quarter,
+      type,
+      objectiveTitle: title,
+      objectiveDescription: '',
+      systemArchitect: '',
+      productOkrLink: '',
+      objectiveStatus: 'green',
+      keyResults: '[]'
+    });
+
+    if (!updateResult.success) {
+      console.error(`Failed to update OKR:`, updateResult.error);
+    }
+  } else {
+    // Initialize EMM-specific fields if this is an EMM
+    newItem.emmTitle = title;
+    newItem.emmDescription = '';
+    newItem.emmPriority = 'P1';
+    newItem.emmStatus = 'green';
+    newItem.emmInput = '';
+    newItem.emmOutput = '';
+    newItem.emmNotes = '';
+
+    // Update EMM with all fields
+    const updateResult = await window.electronAPI.emms.update(newItem.filePath, {
+      quarter,
+      type,
+      emmTitle: title,
+      emmDescription: '',
+      emmPriority: 'P1',
+      emmStatus: 'green',
+      emmInput: '',
+      emmOutput: '',
+      emmNotes: ''
+    });
+
+    if (!updateResult.success) {
+      console.error(`Failed to update EMM:`, updateResult.error);
+    }
+  }
+
+  // Add to state
+  if (type === 'okr') {
+    if (!state.okrs[quarter]) {
+      state.okrs[quarter] = [];
+    }
+    state.okrs[quarter].push(newItem);
+  } else {
+    if (!state.emms[quarter]) {
+      state.emms[quarter] = [];
+    }
+    state.emms[quarter].push(newItem);
+  }
+
+  // Save expanded state before re-rendering
+  const expandedYears = [];
+  const expandedQuarters = [];
+  document.querySelectorAll('.okr-year-header.expanded').forEach(header => {
+    expandedYears.push(header.dataset.year);
+  });
+  document.querySelectorAll('.okr-quarter-header.expanded').forEach(header => {
+    expandedQuarters.push(header.dataset.quarter);
+  });
+
+  // Re-render sidebar
+  renderOkrsSidebar();
+
+  // Restore expanded state
+  expandedYears.forEach(year => {
+    const header = document.querySelector(`.okr-year-header[data-year="${year}"]`);
+    const content = document.querySelector(`.okr-year-content[data-year-content="${year}"]`);
+    if (header && content) {
+      header.classList.add('expanded');
+      content.classList.add('expanded');
+    }
+  });
+  expandedQuarters.forEach(quarter => {
+    const header = document.querySelector(`.okr-quarter-header[data-quarter="${quarter}"]`);
+    const content = document.querySelector(`.okr-quarter-content[data-quarter-content="${quarter}"]`);
+    if (header && content) {
+      header.classList.add('expanded');
+      content.classList.add('expanded');
+    }
+  });
+
+  initializeOkrsHandlers();
+
+  closeAddOkrEmmModal();
+
+  // Open the newly created item
+  openOkrEmmView(type, newItem.id);
+}
+
+function openOkrEmmView(type, id) {
+  console.log(`[OKR/EMM] Opening view for ${type} with ID ${id}`);
+
+  // Convert ID to number for comparison
+  const numericId = typeof id === 'string' ? parseInt(id) : id;
+
+  // Find the item
+  let item = null;
+  const collection = type === 'okr' ? state.okrs : state.emms;
+
+  console.log('[OKR/EMM] Collection quarters:', Object.keys(collection));
+  console.log('[OKR/EMM] Looking for ID:', numericId);
+
+  for (const quarter in collection) {
+    console.log(`[OKR/EMM] Checking quarter ${quarter}, items:`, collection[quarter].map(i => ({ id: i.id, title: i.title })));
+    const found = collection[quarter].find(i => i.id === numericId);
+    if (found) {
+      item = found;
+      console.log('[OKR/EMM] Found item:', item.title);
+      break;
+    }
+  }
+
+  if (!item) {
+    console.error(`[OKR/EMM] Item not found: ${type} ${id}`);
+    console.error('[OKR/EMM] Available items in collection:', collection);
+    return;
+  }
+
+  // Set current item
+  state.currentOkrEmm = item;
+
+  // Clear other selections
+  state.currentFolderId = null;
+  renderSidebarFolders();
+
+  // Highlight the item in the sidebar
+  document.querySelectorAll('.okr-emm-item').forEach(el => el.classList.remove('active'));
+  const itemElement = document.querySelector(`.okr-emm-item[data-type="${type}"][data-id="${id}"]`);
+  if (itemElement) {
+    itemElement.classList.add('active');
+  }
+
+  // Navigate to OKR/EMM view
+  navigateToView('okr-emm-view');
+
+  // Render the view (placeholder for now)
+  renderOkrEmmView();
+}
+
+function renderOkrEmmView() {
+  const container = document.getElementById('okr-emm-content');
+  if (!container || !state.currentOkrEmm) {
+    console.error('[OKR/EMM] Cannot render: container or currentOkrEmm is null');
+    return;
+  }
+
+  const item = state.currentOkrEmm;
+  const typeLabel = item.type === 'okr' ? 'OKR' : 'EMM';
+
+  console.log('[OKR/EMM] Rendering view for:', item.title);
+  console.log('[OKR/EMM] Item data:', {
+    type: item.type,
+    quarter: item.quarter,
+    objectiveTitle: item.objectiveTitle,
+    objectiveDescription: item.objectiveDescription,
+    systemArchitect: item.systemArchitect,
+    productOkrLink: item.productOkrLink,
+    objectiveStatus: item.objectiveStatus,
+    keyResults: item.keyResults
+  });
+
+  // Render EMM view
+  if (item.type === 'emm') {
+    const html = `
+      <div class="okr-document">
+        <div class="okr-header">
+          <div class="okr-header-top">
+            <h1 class="okr-title">${escapeHtml(item.title)}</h1>
+            <span class="okr-quarter-badge">${item.quarter.toUpperCase()}</span>
+          </div>
+        </div>
+
+        <div class="okr-objective-section">
+          <h2 class="section-title">
+            <span class="material-icons">description</span>
+            Engineering Maturity Model Initiative
+          </h2>
+
+          <div class="okr-form">
+            <div class="form-group">
+              <label>Title</label>
+              <input type="text" id="emm-title" class="input-lg" value="${escapeHtml(item.emmTitle || item.title)}" />
+            </div>
+
+            <div class="form-group">
+              <label>Description</label>
+              <textarea id="emm-description" class="textarea-lg" rows="4" placeholder="What engineering maturity capability is this initiative improving?">${escapeHtml(item.emmDescription || '')}</textarea>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Priority</label>
+                <select id="emm-priority" class="select">
+                  <option value="P1" ${(item.emmPriority || 'P1') === 'P1' ? 'selected' : ''}>P1</option>
+                  <option value="P2" ${(item.emmPriority || 'P1') === 'P2' ? 'selected' : ''}>P2</option>
+                  <option value="P3" ${(item.emmPriority || 'P1') === 'P3' ? 'selected' : ''}>P3</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Status</label>
+                <select id="emm-status" class="select">
+                  <option value="green" ${(item.emmStatus || 'green') === 'green' ? 'selected' : ''}>🟢 Green</option>
+                  <option value="yellow" ${(item.emmStatus || 'green') === 'yellow' ? 'selected' : ''}>🟡 Yellow</option>
+                  <option value="red" ${(item.emmStatus || 'green') === 'red' ? 'selected' : ''}>🔴 Red</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Input (What you need from other teams)</label>
+              <textarea id="emm-input" class="textarea-lg" rows="3" placeholder="e.g., Architecture review from Platform team, requirements from Product">${escapeHtml(item.emmInput || '')}</textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Output (What you're producing)</label>
+              <textarea id="emm-output" class="textarea-lg" rows="3" placeholder="e.g., CI/CD pipeline improvements, automated testing framework, documentation standards">${escapeHtml(item.emmOutput || '')}</textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Notes</label>
+              <textarea id="emm-notes" class="textarea-lg" rows="4" placeholder="Additional context, trends, or observations">${escapeHtml(item.emmNotes || '')}</textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    console.log('[EMM] About to set innerHTML, HTML length:', html.length);
+    container.innerHTML = html;
+    console.log('[EMM] innerHTML set successfully, initializing handlers');
+    initializeEmmHandlers();
+    console.log('[EMM] Render complete');
+    return;
+  }
+
+  // Render OKR view
+  const keyResults = item.keyResults || [];
+
+  let html = `
+    <div class="okr-document">
+      <div class="okr-header">
+        <div class="okr-header-top">
+          <h1 class="okr-title">${escapeHtml(item.title)}</h1>
+          <span class="okr-quarter-badge">${item.quarter.toUpperCase()}</span>
+        </div>
+      </div>
+
+      <div class="okr-objective-section">
+        <h2 class="section-title">
+          <span class="material-icons">flag</span>
+          Objective
+        </h2>
+
+        <div class="okr-form">
+          <div class="form-row">
+            <div class="form-group" style="flex: 2;">
+              <label>Title</label>
+              <input type="text" id="okr-obj-title" class="input-lg" value="${escapeHtml(item.objectiveTitle || item.title)}" />
+            </div>
+            <div class="form-group">
+              <label>Status</label>
+              <select id="okr-obj-status" class="select">
+                <option value="green" ${(item.objectiveStatus || 'green') === 'green' ? 'selected' : ''}>🟢 Green</option>
+                <option value="yellow" ${(item.objectiveStatus || 'green') === 'yellow' ? 'selected' : ''}>🟡 Yellow</option>
+                <option value="red" ${(item.objectiveStatus || 'green') === 'red' ? 'selected' : ''}>🔴 Red</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Description</label>
+            <textarea id="okr-obj-description" class="textarea-lg" rows="3" placeholder="What is this objective about?">${escapeHtml(item.objectiveDescription || '')}</textarea>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>System Architect</label>
+              <input type="text" id="okr-obj-architect" class="input-lg" value="${escapeHtml(item.systemArchitect || '')}" placeholder="Name" />
+            </div>
+            <div class="form-group">
+              <label>Product OKR Link</label>
+              <input type="text" id="okr-obj-product-link" class="input-lg" value="${escapeHtml(item.productOkrLink || '')}" placeholder="URL or reference" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="okr-keyresults-section">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span class="material-icons">analytics</span>
+            Key Results
+          </h2>
+          <button id="add-key-result-btn" class="btn-secondary">
+            <span class="material-icons" style="font-size: 18px; vertical-align: middle; margin-right: 0.25rem;">add</span>
+            Add Key Result
+          </button>
+        </div>
+
+        <div id="key-results-list" class="key-results-list">
+  `;
+
+  if (keyResults.length === 0) {
+    html += `
+      <div class="empty-state" style="text-align: center; padding: 3rem; color: var(--text-secondary);">
+        <span class="material-icons" style="font-size: 48px; opacity: 0.3;">analytics</span>
+        <p style="margin-top: 1rem;">No key results yet. Click "Add Key Result" to get started.</p>
+      </div>
+    `;
+  } else {
+    keyResults.forEach((kr, index) => {
+      html += renderKeyResult(kr, index);
+    });
+  }
+
+  html += `
+        </div>
+      </div>
+    </div>
+  `;
+
+  console.log('[OKR/EMM] About to set innerHTML, HTML length:', html.length);
+  container.innerHTML = html;
+  console.log('[OKR/EMM] innerHTML set successfully, initializing handlers');
+  initializeOkrHandlers();
+  console.log('[OKR/EMM] Render complete');
+}
+
+function renderKeyResult(kr, index) {
+  return `
+    <div class="key-result-card" data-kr-index="${index}">
+      <div class="key-result-header">
+        <div class="key-result-number">KR ${index + 1}</div>
+        <button class="delete-kr-btn icon-btn" data-kr-index="${index}" title="Delete key result">
+          <span class="material-icons">delete</span>
+        </button>
+      </div>
+
+      <div class="key-result-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Priority</label>
+            <select class="select kr-priority" data-kr-index="${index}">
+              <option value="P1" ${(kr.priority || 'P1') === 'P1' ? 'selected' : ''}>P1</option>
+              <option value="P2" ${(kr.priority || 'P1') === 'P2' ? 'selected' : ''}>P2</option>
+              <option value="P3" ${(kr.priority || 'P1') === 'P3' ? 'selected' : ''}>P3</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select class="select kr-status" data-kr-index="${index}">
+              <option value="not started" ${(kr.status || 'not started') === 'not started' ? 'selected' : ''}>Not Started</option>
+              <option value="in work" ${(kr.status || 'not started') === 'in work' ? 'selected' : ''}>In Work</option>
+              <option value="blocked" ${(kr.status || 'not started') === 'blocked' ? 'selected' : ''}>Blocked</option>
+              <option value="done" ${(kr.status || 'not started') === 'done' ? 'selected' : ''}>Done</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Input (What you need from other teams)</label>
+          <textarea class="textarea-lg kr-input" data-kr-index="${index}" rows="2" placeholder="e.g., API documentation from Backend team, designs from UX team">${escapeHtml(kr.input || '')}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Outputs (What you're producing)</label>
+          <textarea class="textarea-lg kr-output" data-kr-index="${index}" rows="2" placeholder="e.g., Feature implementation by Frontend team, test coverage by QA team">${escapeHtml(kr.output || '')}</textarea>
+        </div>
+
+        <div class="form-group">
+          <label>Jira Links</label>
+          <input type="text" class="input-lg kr-jira" data-kr-index="${index}" value="${escapeHtml(kr.jiraLinks || '')}" placeholder="Comma-separated Jira ticket URLs" />
+        </div>
+
+        <div class="form-group">
+          <label>Notes</label>
+          <textarea class="textarea-lg kr-notes" data-kr-index="${index}" rows="3" placeholder="Additional notes and context">${escapeHtml(kr.notes || '')}</textarea>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function initializeOkrHandlers() {
+  if (!state.currentOkrEmm || state.currentOkrEmm.type !== 'okr') return;
+
+  // Add Key Result button
+  const addKrBtn = document.getElementById('add-key-result-btn');
+  if (addKrBtn) {
+    addKrBtn.addEventListener('click', addKeyResult);
+  }
+
+  // Delete Key Result buttons
+  document.querySelectorAll('.delete-kr-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const index = parseInt(e.currentTarget.dataset.krIndex);
+      deleteKeyResult(index);
+    });
+  });
+
+  // Auto-save on input change (debounced)
+  let saveTimeout = null;
+  const autoSave = () => {
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+      saveCurrentOkr();
+    }, 1000);
+  };
+
+  // Objective fields
+  ['okr-obj-title', 'okr-obj-description', 'okr-obj-architect', 'okr-obj-product-link'].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.addEventListener('input', autoSave);
+      element.addEventListener('change', autoSave);
+    }
+  });
+
+  const statusSelect = document.getElementById('okr-obj-status');
+  if (statusSelect) {
+    statusSelect.addEventListener('change', autoSave);
+  }
+
+  // Key Result fields
+  document.querySelectorAll('.kr-priority, .kr-status, .kr-input, .kr-output, .kr-jira, .kr-notes').forEach(element => {
+    element.addEventListener('input', autoSave);
+    element.addEventListener('change', autoSave);
+  });
+}
+
+function addKeyResult() {
+  if (!state.currentOkrEmm || state.currentOkrEmm.type !== 'okr') return;
+
+  const newKr = {
+    priority: 'P1',
+    status: 'not started',
+    input: '',
+    output: '',
+    jiraLinks: '',
+    notes: ''
+  };
+
+  if (!state.currentOkrEmm.keyResults) {
+    state.currentOkrEmm.keyResults = [];
+  }
+
+  state.currentOkrEmm.keyResults.push(newKr);
+  renderOkrEmmView();
+  saveCurrentOkr();
+}
+
+function deleteKeyResult(index) {
+  if (!state.currentOkrEmm || state.currentOkrEmm.type !== 'okr') return;
+
+  const confirmed = confirm(`Are you sure you want to delete Key Result ${index + 1}?\n\nThis action cannot be undone.`);
+  if (!confirmed) return;
+
+  state.currentOkrEmm.keyResults.splice(index, 1);
+  renderOkrEmmView();
+  saveCurrentOkr();
+}
+
+async function saveCurrentOkr() {
+  if (!state.currentOkrEmm || state.currentOkrEmm.type !== 'okr') return;
+
+  // Collect objective data
+  const objectiveTitle = document.getElementById('okr-obj-title')?.value || state.currentOkrEmm.title;
+  const objectiveDescription = document.getElementById('okr-obj-description')?.value || '';
+  const systemArchitect = document.getElementById('okr-obj-architect')?.value || '';
+  const productOkrLink = document.getElementById('okr-obj-product-link')?.value || '';
+  const objectiveStatus = document.getElementById('okr-obj-status')?.value || 'green';
+
+  // Collect key results data
+  const keyResults = [];
+  document.querySelectorAll('.key-result-card').forEach((card) => {
+    const index = parseInt(card.dataset.krIndex);
+    const kr = {
+      priority: card.querySelector('.kr-priority')?.value || 'P1',
+      status: card.querySelector('.kr-status')?.value || 'not started',
+      input: card.querySelector('.kr-input')?.value || '',
+      output: card.querySelector('.kr-output')?.value || '',
+      jiraLinks: card.querySelector('.kr-jira')?.value || '',
+      notes: card.querySelector('.kr-notes')?.value || ''
+    };
+    keyResults.push(kr);
+  });
+
+  // Update state
+  state.currentOkrEmm.objectiveTitle = objectiveTitle;
+  state.currentOkrEmm.objectiveDescription = objectiveDescription;
+  state.currentOkrEmm.systemArchitect = systemArchitect;
+  state.currentOkrEmm.productOkrLink = productOkrLink;
+  state.currentOkrEmm.objectiveStatus = objectiveStatus;
+  state.currentOkrEmm.keyResults = keyResults;
+
+  // Save to file via IPC
+  try {
+    const updates = {
+      objectiveTitle,
+      objectiveDescription,
+      systemArchitect,
+      productOkrLink,
+      objectiveStatus,
+      keyResults: JSON.stringify(keyResults)
+    };
+
+    const result = await window.electronAPI.okrs.update(state.currentOkrEmm.filePath, updates);
+    if (!result.success) {
+      console.error('[OKR] Failed to save:', result.error);
+    }
+  } catch (error) {
+    console.error('[OKR] Error saving:', error);
+  }
+}
+
+// ========================================
+// EMM Handlers and Save Functions
+// ========================================
+
+function initializeEmmHandlers() {
+  if (!state.currentOkrEmm || state.currentOkrEmm.type !== 'emm') return;
+
+  console.log('[EMM] Initializing handlers');
+
+  // Auto-save on input change (debounced)
+  let saveTimeout = null;
+  const autoSave = () => {
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+      saveCurrentEmm();
+    }, 1000);
+  };
+
+  // EMM fields
+  ['emm-title', 'emm-description', 'emm-input', 'emm-output', 'emm-notes'].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.addEventListener('input', autoSave);
+      element.addEventListener('change', autoSave);
+    }
+  });
+
+  // EMM dropdown fields
+  ['emm-priority', 'emm-status'].forEach(id => {
+    const element = document.getElementById(id);
+    if (element) {
+      element.addEventListener('change', autoSave);
+    }
+  });
+
+  console.log('[EMM] Handlers initialized');
+}
+
+async function saveCurrentEmm() {
+  if (!state.currentOkrEmm || state.currentOkrEmm.type !== 'emm') return;
+
+  console.log('[EMM] Saving current EMM');
+
+  // Collect EMM data
+  const emmTitle = document.getElementById('emm-title')?.value || state.currentOkrEmm.title;
+  const emmDescription = document.getElementById('emm-description')?.value || '';
+  const emmPriority = document.getElementById('emm-priority')?.value || 'P1';
+  const emmStatus = document.getElementById('emm-status')?.value || 'green';
+  const emmInput = document.getElementById('emm-input')?.value || '';
+  const emmOutput = document.getElementById('emm-output')?.value || '';
+  const emmNotes = document.getElementById('emm-notes')?.value || '';
+
+  // Update state
+  state.currentOkrEmm.emmTitle = emmTitle;
+  state.currentOkrEmm.emmDescription = emmDescription;
+  state.currentOkrEmm.emmPriority = emmPriority;
+  state.currentOkrEmm.emmStatus = emmStatus;
+  state.currentOkrEmm.emmInput = emmInput;
+  state.currentOkrEmm.emmOutput = emmOutput;
+  state.currentOkrEmm.emmNotes = emmNotes;
+
+  // Save to file via IPC
+  try {
+    const updates = {
+      emmTitle,
+      emmDescription,
+      emmPriority,
+      emmStatus,
+      emmInput,
+      emmOutput,
+      emmNotes
+    };
+
+    const result = await window.electronAPI.emms.update(state.currentOkrEmm.filePath, updates);
+    if (!result.success) {
+      console.error('[EMM] Failed to save:', result.error);
+    } else {
+      console.log('[EMM] Saved successfully');
+    }
+  } catch (error) {
+    console.error('[EMM] Error saving:', error);
+  }
 }
 
 async function loadGoals(year = null) {
@@ -2419,6 +3646,13 @@ function renderGoalsSidebar() {
     yearItem.addEventListener('click', (e) => {
       e.stopPropagation();
       loadGoals(year);
+    });
+
+    // Right-click context menu
+    yearItem.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showGoalYearContextMenu(e.clientX, e.clientY, year);
     });
 
     sidebar.appendChild(yearItem);
@@ -8358,6 +9592,74 @@ function setupEventListeners() {
       elements.taskContextMenu.classList.remove('active');
       state.contextMenuTask = null;
     }
+    if (!elements.folderContextMenu.contains(e.target)) {
+      elements.folderContextMenu.classList.remove('active');
+      contextMenuFolderId = null;
+    }
+    if (!elements.okrYearContextMenu.contains(e.target)) {
+      elements.okrYearContextMenu.classList.remove('active');
+      contextMenuOkrYear = null;
+    }
+    if (!elements.goalYearContextMenu.contains(e.target)) {
+      elements.goalYearContextMenu.classList.remove('active');
+      contextMenuGoalYear = null;
+    }
+    if (!elements.okrEmmItemContextMenu.contains(e.target)) {
+      elements.okrEmmItemContextMenu.classList.remove('active');
+      contextMenuOkrEmmItem = null;
+    }
+  });
+
+  // Folder context menu clicks
+  elements.folderContextMenu.addEventListener('click', (e) => {
+    const menuItem = e.target.closest('.context-menu-item');
+    if (!menuItem || !contextMenuFolderId) return;
+
+    const action = menuItem.dataset.action;
+    if (action === 'delete') {
+      deleteFolderFromContextMenu();
+    }
+
+    elements.folderContextMenu.classList.remove('active');
+  });
+
+  // OKR Year context menu clicks
+  elements.okrYearContextMenu.addEventListener('click', (e) => {
+    const menuItem = e.target.closest('.context-menu-item');
+    if (!menuItem || !contextMenuOkrYear) return;
+
+    const action = menuItem.dataset.action;
+    if (action === 'delete') {
+      deleteOkrYearFromContextMenu();
+    }
+
+    elements.okrYearContextMenu.classList.remove('active');
+  });
+
+  // Goal Year context menu clicks
+  elements.goalYearContextMenu.addEventListener('click', (e) => {
+    const menuItem = e.target.closest('.context-menu-item');
+    if (!menuItem || !contextMenuGoalYear) return;
+
+    const action = menuItem.dataset.action;
+    if (action === 'delete') {
+      deleteGoalYearFromContextMenu();
+    }
+
+    elements.goalYearContextMenu.classList.remove('active');
+  });
+
+  // OKR/EMM Item context menu clicks
+  elements.okrEmmItemContextMenu.addEventListener('click', (e) => {
+    const menuItem = e.target.closest('.context-menu-item');
+    if (!menuItem || !contextMenuOkrEmmItem) return;
+
+    const action = menuItem.dataset.action;
+    if (action === 'delete') {
+      deleteOkrEmmItemFromContextMenu();
+    }
+
+    elements.okrEmmItemContextMenu.classList.remove('active');
   });
 
   // Expand/Collapse All
@@ -8582,6 +9884,14 @@ function setupEventListeners() {
   // Folder management
   elements.addFolderSettingsBtn.addEventListener('click', openAddFolderModal);
 
+  // Add folder from sidebar
+  if (elements.addFolderBtnSidebar) {
+    elements.addFolderBtnSidebar.addEventListener('click', (e) => {
+      e.stopPropagation(); // Prevent sidebar section from toggling
+      openAddFolderModal();
+    });
+  }
+
   // Prompt management
   if (elements.addPromptBtn) {
     elements.addPromptBtn.addEventListener('click', addPrompt);
@@ -8624,6 +9934,58 @@ function setupEventListeners() {
       closeAddFolderModal();
     }
   });
+
+  // OKR Year modal
+  if (elements.addOkrYearBtnSidebar) {
+    elements.addOkrYearBtnSidebar.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openAddOkrYearModal();
+    });
+  }
+  if (elements.addOkrYearCancelBtn) {
+    elements.addOkrYearCancelBtn.addEventListener('click', closeAddOkrYearModal);
+  }
+  if (elements.addOkrYearSaveBtn) {
+    elements.addOkrYearSaveBtn.addEventListener('click', saveAddOkrYear);
+  }
+  if (elements.addOkrYearModal) {
+    elements.addOkrYearModal.addEventListener('click', (e) => {
+      if (e.target === elements.addOkrYearModal) {
+        closeAddOkrYearModal();
+      }
+    });
+  }
+  // Allow Enter key to save OKR year
+  if (elements.okrYearInput) {
+    elements.okrYearInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        saveAddOkrYear();
+      }
+    });
+  }
+
+  // OKR/EMM modal event listeners
+  if (elements.addOkrEmmCancelBtn) {
+    elements.addOkrEmmCancelBtn.addEventListener('click', closeAddOkrEmmModal);
+  }
+  if (elements.addOkrEmmSaveBtn) {
+    elements.addOkrEmmSaveBtn.addEventListener('click', saveAddOkrEmm);
+  }
+  if (elements.addOkrEmmModal) {
+    elements.addOkrEmmModal.addEventListener('click', (e) => {
+      if (e.target === elements.addOkrEmmModal) {
+        closeAddOkrEmmModal();
+      }
+    });
+  }
+  // Allow Enter key to save OKR/EMM
+  if (elements.okrEmmTitleInput) {
+    elements.okrEmmTitleInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        saveAddOkrEmm();
+      }
+    });
+  }
 
   // Enter key to save
   elements.folderPathInput.addEventListener('keypress', (e) => {
