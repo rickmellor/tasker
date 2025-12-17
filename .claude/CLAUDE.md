@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Tasker is a cross-platform Electron-based task management application designed to run primarily on Windows, with MacOS support.
+Tasker is a cross-platform Electron-based task management application designed to run on Windows, MacOS, and Linux.
 
 ## Architecture
 
@@ -101,8 +101,16 @@ tasker/
 6. **Cross-Platform Support**
    - Windows: NSIS installer and portable executable
    - MacOS: DMG and ZIP packages
+   - Linux: AppImage and deb packages
 
-7. **Development Mode**
+7. **System Integration**
+   - System tray integration with context menu
+   - Auto-launch on system startup (Windows/Linux)
+   - Start minimized to tray option
+   - Global hotkey support (Ctrl+Alt+T)
+   - **Linux/Wayland specific**: Uses minimize instead of hide for proper window restoration on Wayland compositors (Cosmic, GNOME, etc.)
+
+8. **Development Mode**
    - DevTools accessible with `--dev` flag
    - `npm run dev` for development
 
@@ -115,6 +123,10 @@ tasker/
 ### MacOS
 - DMG image
 - ZIP archive
+
+### Linux
+- AppImage (universal, works on most distributions)
+- deb package (Debian/Ubuntu)
 
 ## Development Workflow
 
@@ -132,7 +144,8 @@ npm run dev
 ```bash
 npm run build:win    # Windows only
 npm run build:mac    # MacOS only
-npm run build:all    # Both platforms
+npm run build:linux  # Linux only
+npm run build:all    # All platforms
 ```
 
 ## UI/UX Design
@@ -234,6 +247,28 @@ Task description and notes go here.
 - Theme automatically detects and follows OS preference by default
 - Tasks can be edited directly in any markdown editor
 - Drag-and-drop creates folders and moves files automatically
+
+## Linux-Specific Notes
+
+### Auto-Launch
+On Linux, auto-launch is implemented using XDG autostart desktop entries:
+- Location: `~/.config/autostart/tasker.desktop`
+- Created/removed automatically via Settings → Startup
+- Works with most desktop environments (GNOME, KDE, XFCE, Cosmic, etc.)
+
+### Wayland Compatibility
+The application is fully compatible with Wayland display servers:
+- **Window Management**: Uses `minimize()` instead of `hide()` for tray operations to ensure proper window restoration on Wayland compositors
+- **Tested on**: Cosmic desktop environment (Wayland)
+
+### System Tray
+- Tray icon automatically adjusts for light/dark system themes
+- Right-click for context menu (Show Tasker, Exit)
+- Left-click to toggle window visibility
+
+### Distribution
+- **AppImage**: Self-contained, no installation required. Make executable with `chmod +x` and run
+- **deb package**: Installs to system, creates desktop entry, integrates with application menu
 
 ## Agent Usage
 
